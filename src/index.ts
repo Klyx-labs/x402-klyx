@@ -72,3 +72,10 @@ export type {
   FacilitatorClientOptions,
   FacilitatorErrorCode,
 } from "./core/facilitatorClient.js";
+
+// Provider middleware (express)
+export { paymentMiddleware } from "./provider/express.js";
+export type {
+  PaymentMiddlewareOptions,
+  AcceptedPayment,
+} from "./provider/express.js";

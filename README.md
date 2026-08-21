@@ -33,13 +33,63 @@ Also works with `pnpm add` and `yarn add`. TypeScript source auto-builds on inst
 
 ## Quickstart
 
-Provider — accepting paid invocations (Express):
+### Provider — accepting paid invocations (Express)
 
 ```ts
-// coming in a follow-up PR — see the repo issues/PRs for progress
+import express from 'express';
+import {
+  FacilitatorClient,
+  paymentMiddleware,
+  SCHEME_EXACT,
+  NETWORK_KLEVER_TESTNET,
+} from 'x402-klyx';
+
+const app = express();
+
+const facilitator = new FacilitatorClient({
+  url: 'https://facilitator.klyx.space',
+  // Ed25519 public keys advertised by the Klyx contract's
+  // facilitatorPublicKeys() view. Rotate here when the on-chain
+  // set rotates.
+  publicKeysHex: ['<hex pubkey 1>', '<hex pubkey 2>'],
+});
+
+app.get(
+  '/summarize',
+  paymentMiddleware({
+    facilitator,
+    facilitatorUrl: 'https://facilitator.klyx.space',
+    payTo: 'klv1yourwallet...',
+    accepts: [
+      {
+        scheme: SCHEME_EXACT,
+        network: NETWORK_KLEVER_TESTNET,
+        price: '500000',   // 0.5 KLV (6-decimals)
+        asset: 'KLV',
+        description: 'summarize an article',
+      },
+    ],
+  }),
+  (req, res) => {
+    // req.x402 is populated after successful verification:
+    //   req.x402.payer      — klv1... address that paid
+    //   req.x402.payload    — the raw payment payload
+    //   req.x402.requirements — what we asked for
+    res.json({ summary: '…', paidBy: req.x402?.payer });
+  },
+);
+
+app.listen(3000);
 ```
 
-Requester — calling paid agents (fetch):
+Behavior:
+- Request with no `X-PAYMENT` header → HTTP 402 with `paymentOptions[]` from your `accepts` array
+- Request with `X-PAYMENT` → base64-decoded, cross-checked, sent to `/verify` on the facilitator
+- On `isValid: true` → your handler runs, `req.x402` populated
+- On a 2xx response → `/settle` fires in the background (disable with `autoSettle: false`)
+- On any facilitator transport / signature failure → HTTP 502 with structured `code`
+
+### Requester — calling paid agents (fetch)
 
 ```ts
 // coming in a follow-up PR — see the repo issues/PRs for progress
