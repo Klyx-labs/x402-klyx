@@ -10,6 +10,7 @@ import {
   SCHEME_EXACT,
 } from "../src/core/schemes/index.js";
 import { X402_VERSION } from "../src/core/types.js";
+import { fromPrivateKey } from "../src/core/wallet.js";
 
 const TEST_PRIVATE_KEY =
   "1111111111111111111111111111111111111111111111111111111111111111";
@@ -27,14 +28,13 @@ function baseInput() {
     destination: PROVIDER_ADDR,
     nonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     expiresAt: "2030-01-01T00:00:00Z",
-    signer: SIGNER_ADDR,
-    privateKeyHex: TEST_PRIVATE_KEY,
+    wallet: fromPrivateKey(TEST_PRIVATE_KEY, SIGNER_ADDR),
   };
 }
 
 describe("buildAndSignKleverExactPayload", () => {
-  it("produces a wire-ready PaymentPayload envelope", () => {
-    const p = buildAndSignKleverExactPayload(
+  it("produces a wire-ready PaymentPayload envelope", async () => {
+    const p = await buildAndSignKleverExactPayload(
       baseInput(),
       NETWORK_KLEVER_TESTNET,
     );
@@ -49,12 +49,11 @@ describe("buildAndSignKleverExactPayload", () => {
     );
   });
 
-  it("attestation verifies against the canonicalized-minus-attestation body", () => {
-    // This is the round-trip that the Klyx facilitator performs on
+  it("attestation verifies against the canonicalized-minus-attestation body", async () => {
+    // This is the round-trip the Klyx facilitator performs on
     // /verify: canonicalize the payload minus authorization.attestation,
-    // verify the ed25519 sig against authorization.publicKey. Anything
-    // that fails here would fail at the facilitator too.
-    const p = buildAndSignKleverExactPayload(
+    // verify the ed25519 sig against authorization.publicKey.
+    const p = await buildAndSignKleverExactPayload(
       baseInput(),
       NETWORK_KLEVER_TESTNET,
     );
@@ -87,59 +86,136 @@ describe("buildAndSignKleverExactPayload", () => {
     expect(ok).toBe(true);
   });
 
-  it("rejects non-integer amount at build time", () => {
-    expect(() =>
+  it("rejects non-integer amount at build time (BEFORE calling wallet.sign)", async () => {
+    await expect(
       buildAndSignKleverExactPayload(
         { ...baseInput(), amount: "0.5" },
         NETWORK_KLEVER_TESTNET,
       ),
-    ).toThrow(/amount/);
+    ).rejects.toThrow(/amount/);
   });
 
-  it("rejects malformed bech32 destination", () => {
-    expect(() =>
+  it("rejects malformed bech32 destination", async () => {
+    await expect(
       buildAndSignKleverExactPayload(
         { ...baseInput(), destination: "0x0000000000000000000000000000000000000000" },
         NETWORK_KLEVER_TESTNET,
       ),
-    ).toThrow(/destination/);
+    ).rejects.toThrow(/destination/);
   });
 
-  it("rejects nonce too short", () => {
-    expect(() =>
+  it("rejects nonce too short", async () => {
+    await expect(
       buildAndSignKleverExactPayload(
         { ...baseInput(), nonce: "aaaa" },
         NETWORK_KLEVER_TESTNET,
       ),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it("rejects uppercase hex in nonce (lowercase-only per parity #608)", () => {
-    // Canonicalization preserves case; a lowercasing middleware
-    // would silently break attestations if we accepted mixed case.
-    expect(() =>
+  it("rejects uppercase hex in nonce (lowercase-only per parity #608)", async () => {
+    await expect(
       buildAndSignKleverExactPayload(
         { ...baseInput(), nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
         NETWORK_KLEVER_TESTNET,
       ),
-    ).toThrow();
+    ).rejects.toThrow();
   });
 
-  it("rejects amounts longer than 40 digits (u128 bound per #610)", () => {
-    // Unbounded /^\d+$/ would let a caller DoS the facilitator with
-    // a 10M-digit amount that stalls on BigInt() parse.
-    expect(() =>
+  it("rejects amounts longer than 40 digits (u128 bound per #610)", async () => {
+    await expect(
       buildAndSignKleverExactPayload(
         { ...baseInput(), amount: "1".repeat(41) },
         NETWORK_KLEVER_TESTNET,
       ),
-    ).toThrow(/amount/);
+    ).rejects.toThrow(/amount/);
+  });
+
+  it("input validation runs BEFORE wallet.sign is invoked (no wasted popup)", async () => {
+    // Custom wallet that records every sign call. Bad input should
+    // never reach it.
+    const signCalls: string[] = [];
+    const wallet = {
+      address: SIGNER_ADDR,
+      publicKeyHex: derivePublicKey(TEST_PRIVATE_KEY),
+      sign: (body: string) => {
+        signCalls.push(body);
+        return "0".repeat(128);
+      },
+    };
+    await expect(
+      buildAndSignKleverExactPayload(
+        { ...baseInput(), wallet, amount: "not-a-number" },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).rejects.toThrow();
+    expect(signCalls).toHaveLength(0);
+  });
+
+  it("surfaces wallet.sign errors as builder throws", async () => {
+    const wallet = {
+      address: SIGNER_ADDR,
+      publicKeyHex: derivePublicKey(TEST_PRIVATE_KEY),
+      sign: async () => {
+        throw new Error("user declined popup");
+      },
+    };
+    await expect(
+      buildAndSignKleverExactPayload(
+        { ...baseInput(), wallet },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).rejects.toThrow(/user declined popup/);
+  });
+
+  it("rejects wallet returning malformed signature (wrong length)", async () => {
+    const wallet = {
+      address: SIGNER_ADDR,
+      publicKeyHex: derivePublicKey(TEST_PRIVATE_KEY),
+      sign: () => "abc",  // way too short
+    };
+    await expect(
+      buildAndSignKleverExactPayload(
+        { ...baseInput(), wallet },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).rejects.toThrow(/128 chars/);
+  });
+
+  it("rejects wallet returning uppercase hex signature", async () => {
+    const wallet = {
+      address: SIGNER_ADDR,
+      publicKeyHex: derivePublicKey(TEST_PRIVATE_KEY),
+      sign: () => "A".repeat(128),
+    };
+    await expect(
+      buildAndSignKleverExactPayload(
+        { ...baseInput(), wallet },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).rejects.toThrow(/lowercase hex/);
+  });
+
+  it("accepts an async wallet callback", async () => {
+    const wallet = fromPrivateKey(TEST_PRIVATE_KEY, SIGNER_ADDR);
+    // Wrap in async layer to prove Promise return is handled.
+    const asyncWallet = {
+      address: wallet.address,
+      publicKeyHex: wallet.publicKeyHex,
+      sign: async (body: string) => wallet.sign(body),
+    };
+    const p = await buildAndSignKleverExactPayload(
+      { ...baseInput(), wallet: asyncWallet },
+      NETWORK_KLEVER_TESTNET,
+    );
+    const payload = p.payload as { authorization: { attestation: string } };
+    expect(payload.authorization.attestation).toMatch(/^[0-9a-f]{128}$/);
   });
 });
 
 describe("parseKleverExactPayload", () => {
-  it("accepts a payload built by the signer", () => {
-    const p = buildAndSignKleverExactPayload(
+  it("accepts a payload built by the signer", async () => {
+    const p = await buildAndSignKleverExactPayload(
       baseInput(),
       NETWORK_KLEVER_TESTNET,
     );

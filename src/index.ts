@@ -7,7 +7,7 @@
  * here.
  */
 
-export const VERSION = "0.1.0";
+export const VERSION = "0.2.0";
 
 // Types + protocol constants
 export type {
@@ -80,13 +80,16 @@ export type {
   AcceptedPayment,
 } from "./provider/express.js";
 
+// Wallet abstraction — used by both requester and receiptEmitter
+export { fromPrivateKey, assertValidSignatureHex } from "./core/wallet.js";
+export type { KleverWallet } from "./core/wallet.js";
+
 // Requester interceptor (fetch)
 export {
   withPaymentInterceptor,
   PaymentError,
 } from "./requester/fetch.js";
 export type {
-  KleverWallet,
   WithPaymentInterceptorOptions,
   PaymentAttemptInfo,
   PaymentErrorCode,

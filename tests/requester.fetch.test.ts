@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import {
   withPaymentInterceptor,
   PaymentError,
+  fromPrivateKey,
   X402_VERSION,
   SCHEME_EXACT,
   SCHEME_KLYX_ESCROW,
@@ -25,10 +26,7 @@ const PROVIDER = "klv1provider0000000000000000000000000000000";
 const FAC_URL = "https://facilitator.example";
 const RESOURCE = "/premium";
 
-const wallet: KleverWallet = {
-  address: SIGNER,
-  privateKeyHex: TEST_PRIVATE_KEY,
-};
+const wallet: KleverWallet = fromPrivateKey(TEST_PRIVATE_KEY, SIGNER);
 
 function make402Body(overrides?: {
   options?: PaymentOption[];
@@ -400,18 +398,90 @@ describe("withPaymentInterceptor — constructor validation", () => {
     expect(() =>
       withPaymentInterceptor(fetch, {
         address: "",
-        privateKeyHex: TEST_PRIVATE_KEY,
+        publicKeyHex: TEST_PUBLIC_KEY,
+        sign: () => "0".repeat(128),
       }),
     ).toThrow(/address required/);
   });
 
-  it("throws on missing wallet.privateKeyHex", () => {
+  it("throws on missing wallet.publicKeyHex", () => {
     expect(() =>
       withPaymentInterceptor(fetch, {
         address: SIGNER,
-        privateKeyHex: "",
+        publicKeyHex: "",
+        sign: () => "0".repeat(128),
       }),
-    ).toThrow(/privateKeyHex required/);
+    ).toThrow(/publicKeyHex required/);
+  });
+
+  it("throws when wallet.sign is not a function", () => {
+    expect(() =>
+      withPaymentInterceptor(fetch, {
+        address: SIGNER,
+        publicKeyHex: TEST_PUBLIC_KEY,
+        sign: undefined as unknown as (b: string) => string,
+      }),
+    ).toThrow(/sign function required/);
+  });
+});
+
+describe("withPaymentInterceptor — async wallet callback", () => {
+  it("supports async wallet.sign (wallet-extension flow)", async () => {
+    // Simulates an extension that resolves after user approval.
+    const inner = makeSequencedFetch([
+      makeResponse(402, make402Body()),
+      makeResponse(200, { ok: true }),
+    ]);
+    const inProcess = fromPrivateKey(TEST_PRIVATE_KEY, SIGNER);
+    const asyncWallet: KleverWallet = {
+      address: inProcess.address,
+      publicKeyHex: inProcess.publicKeyHex,
+      sign: async (body) => {
+        await new Promise((r) => setTimeout(r, 5));  // fake extension delay
+        return inProcess.sign(body) as string;
+      },
+    };
+    const paid = withPaymentInterceptor(
+      inner as unknown as typeof fetch,
+      asyncWallet,
+    );
+    const res = await paid("https://agent.example/premium");
+    expect(res.status).toBe(200);
+    expect(inner).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces wallet errors as PaymentError with wallet_error code", async () => {
+    const inner = makeSequencedFetch([makeResponse(402, make402Body())]);
+    const badWallet: KleverWallet = {
+      address: SIGNER,
+      publicKeyHex: TEST_PUBLIC_KEY,
+      sign: async () => {
+        throw new Error("user rejected the signing popup");
+      },
+    };
+    const paid = withPaymentInterceptor(
+      inner as unknown as typeof fetch,
+      badWallet,
+    );
+    await expect(paid("https://agent.example/premium")).rejects.toMatchObject({
+      code: "wallet_error",
+    });
+  });
+
+  it("surfaces wallet returning malformed signature as wallet_error", async () => {
+    const inner = makeSequencedFetch([makeResponse(402, make402Body())]);
+    const brokenWallet: KleverWallet = {
+      address: SIGNER,
+      publicKeyHex: TEST_PUBLIC_KEY,
+      sign: () => "not-a-real-signature",
+    };
+    const paid = withPaymentInterceptor(
+      inner as unknown as typeof fetch,
+      brokenWallet,
+    );
+    await expect(paid("https://agent.example/premium")).rejects.toMatchObject({
+      code: "wallet_error",
+    });
   });
 });
 

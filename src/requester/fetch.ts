@@ -40,16 +40,11 @@ import type {
   Http402Body,
   PaymentOption,
 } from "../core/types.js";
+import type { KleverWallet } from "../core/wallet.js";
 
-/** Wallet-shaped input for signing klever-exact payloads. */
-export interface KleverWallet {
-  /** klv1... bech32 address that will sign + pay. */
-  address: string;
-  /** Ed25519 private key hex (32 bytes / 64 chars). Held in
-   *  process — for wallet-extension flows a callback-based
-   *  variant will land in a follow-up. */
-  privateKeyHex: string;
-}
+/** Re-export for callers who want the wallet type without
+ *  reaching into core/. Actual type lives at `../core/wallet.js`. */
+export type { KleverWallet } from "../core/wallet.js";
 
 /** Observability payload for the optional `onPayment` hook. Fires
  *  after building + signing but BEFORE the retry request goes
@@ -131,8 +126,11 @@ export function withPaymentInterceptor(
   if (!wallet?.address) {
     throw new Error("withPaymentInterceptor: wallet.address required");
   }
-  if (!wallet.privateKeyHex) {
-    throw new Error("withPaymentInterceptor: wallet.privateKeyHex required");
+  if (!wallet.publicKeyHex) {
+    throw new Error("withPaymentInterceptor: wallet.publicKeyHex required");
+  }
+  if (typeof wallet.sign !== "function") {
+    throw new Error("withPaymentInterceptor: wallet.sign function required");
   }
   const preferScheme = opts.preferScheme ?? SCHEME_EXACT;
   const preferNetwork = opts.preferNetwork ?? NETWORK_KLEVER_TESTNET;
@@ -216,19 +214,22 @@ export function withPaymentInterceptor(
 
     let payload;
     try {
-      payload = buildAndSignKleverExactPayload(
+      payload = await buildAndSignKleverExactPayload(
         {
           asset: option.asset,
           amount: option.maxAmountRequired,
           destination: option.payTo,
           nonce,
           expiresAt,
-          signer: wallet.address,
-          privateKeyHex: wallet.privateKeyHex,
+          wallet,
         },
         option.network as KleverNetwork,
       );
     } catch (err) {
+      // Wallet callback threw (user declined popup, hardware
+      // wallet timed out, KMS rejected) — surface as wallet_error
+      // so callers can distinguish it from network / config
+      // problems.
       throw new PaymentError(
         `failed to build payload: ${(err as Error).message}`,
         "wallet_error",

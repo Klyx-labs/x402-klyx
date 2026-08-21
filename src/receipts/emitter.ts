@@ -28,8 +28,8 @@
 
 import { sha256 } from "@noble/hashes/sha256";
 import { canonicalize } from "../core/canonicalize.js";
-import { bytesToHex, signAttestation } from "../core/signing.js";
-import type { KleverWallet } from "../requester/fetch.js";
+import { bytesToHex } from "../core/signing.js";
+import { assertValidSignatureHex, type KleverWallet } from "../core/wallet.js";
 import type {
   AttestationScheme,
   EmittedReceipt,
@@ -51,10 +51,15 @@ export interface ReceiptEmitterOptions {
    */
   providerAgentUserId: string;
   /**
-   * Provider wallet — used to sign the klv-ed25519 attestation.
-   * The wallet's derived pubkey MUST match a key registered
-   * against `providerAgentUserId` on Klyx (otherwise the receipt
-   * signature won't verify at a later phase).
+   * Provider wallet — signs the klv-ed25519 attestation on each
+   * receipt. Use `fromPrivateKey(hex, address)` for in-process
+   * keys, or an adapter (e.g. wrapping Klever Web Extension) for
+   * browser + hardware wallet flows.
+   *
+   * The wallet's `publicKeyHex` MUST match a key registered
+   * against `providerAgentUserId` on Klyx — otherwise the
+   * signature won't verify at a later phase, and the receipt is
+   * silently downgraded in reputation scoring.
    */
   wallet: KleverWallet;
   /** Request timeout in ms. Default 15000. */
@@ -133,8 +138,11 @@ export function createReceiptEmitter(
   if (!opts.wallet?.address) {
     throw new Error("createReceiptEmitter: wallet.address required");
   }
-  if (!opts.wallet?.privateKeyHex) {
-    throw new Error("createReceiptEmitter: wallet.privateKeyHex required");
+  if (!opts.wallet.publicKeyHex) {
+    throw new Error("createReceiptEmitter: wallet.publicKeyHex required");
+  }
+  if (typeof opts.wallet.sign !== "function") {
+    throw new Error("createReceiptEmitter: wallet.sign function required");
   }
   const url = opts.klyxApiUrl.replace(/\/+$/, "");
   const timeoutMs = opts.timeoutMs ?? 15_000;
@@ -173,17 +181,20 @@ export function createReceiptEmitter(
         sha256(new TextEncoder().encode(canonicalBody)),
       );
 
-      // 4. Sign the canonical bytes with the wallet's ed25519 key
-      //    — same primitive as klever-exact attestation. Result is
-      //    a hex string, provided as providerAttestation on the
-      //    outgoing POST body.
+      // 4. Sign the canonical bytes via the wallet callback. Same
+      //    klv-ed25519 primitive as klever-exact attestation. The
+      //    wallet's sign() handles the SHA-256 + ed25519 internally
+      //    (for in-process wallets via `fromPrivateKey`) or
+      //    delegates to an extension / hardware wallet / KMS.
       let providerAttestation: string;
       try {
-        providerAttestation = signAttestation({
-          canonicalBody,
-          privateKeyHex: opts.wallet.privateKeyHex,
-        });
+        providerAttestation = await opts.wallet.sign(canonicalBody);
+        assertValidSignatureHex(providerAttestation);
       } catch (err) {
+        // Wallet declined, hardware timeout, adapter returned junk
+        // — surface as malformed_receipt so onError sees it and we
+        // don't retry (the caller's wallet state won't magically
+        // change on retry).
         const rerr = new ReceiptError(
           `failed to sign attestation: ${(err as Error).message}`,
           "malformed_receipt",
