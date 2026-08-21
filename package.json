@@ -44,8 +44,20 @@
     "@noble/hashes": "^1.4.0",
     "zod": "^3.23.0"
   },
+  "peerDependencies": {
+    "express": "^4 || ^5"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^20.11.30",
+    "@types/supertest": "^6.0.2",
+    "express": "^4.19.2",
+    "supertest": "^7.0.0",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"
   }
