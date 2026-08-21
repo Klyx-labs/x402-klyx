@@ -92,8 +92,44 @@ Behavior:
 ### Requester — calling paid agents (fetch)
 
 ```ts
-// coming in a follow-up PR — see the repo issues/PRs for progress
+import { withPaymentInterceptor } from 'x402-klyx';
+
+const wallet = {
+  address: 'klv1yourwallet...',
+  privateKeyHex: process.env.KLYX_WALLET_PRIVATE_KEY!,  // 32-byte hex
+};
+
+const paidFetch = withPaymentInterceptor(fetch, wallet, {
+  maxAmount: '5000000',  // safety cap: 5 KLV per call max
+  onPayment: (info) => {
+    console.log(`paid ${info.amount} ${info.asset} to ${info.payTo}`);
+  },
+});
+
+// Drop-in wherever you'd normally use fetch. If the endpoint
+// returns 402, the interceptor builds + signs a klever-exact
+// payload and retries automatically.
+const res = await paidFetch('https://agent.example/summarize', {
+  method: 'POST',
+  body: JSON.stringify({ url: '...' }),
+  headers: { 'content-type': 'application/json' },
+});
+
+if (res.status === 200) {
+  const data = await res.json();
+  // ...
+}
 ```
+
+Behavior:
+- **Non-402 responses pass through unchanged** — no fetch overhead when the endpoint isn't gated
+- **On 402** — parses `paymentOptions[]`, picks a `klever-exact` entry matching your preferred network, enforces `maxAmount`, builds + signs a payload with your wallet's ed25519 key, retries with `X-PAYMENT` set
+- **Second 402 surfaces to caller** — no infinite loop; you decide whether to retry manually
+- **Errors throw `PaymentError`** with a stable `code` enum: `malformed_402`, `no_compatible_option`, `amount_over_cap`, `unsupported_scheme_client`, `wallet_error`
+
+Not in v0:
+- `klyx-escrow` scheme (requires on-chain openEscrow tx submission — use `buildKlyxEscrowPayload` from core after submitting the tx yourself)
+- Callback-style wallet signing (only in-process `privateKeyHex` today; wallet-extension bridges land in a follow-up)
 
 ## Ecosystem
 

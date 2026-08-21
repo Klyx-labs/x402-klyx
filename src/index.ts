@@ -79,3 +79,15 @@ export type {
   PaymentMiddlewareOptions,
   AcceptedPayment,
 } from "./provider/express.js";
+
+// Requester interceptor (fetch)
+export {
+  withPaymentInterceptor,
+  PaymentError,
+} from "./requester/fetch.js";
+export type {
+  KleverWallet,
+  WithPaymentInterceptorOptions,
+  PaymentAttemptInfo,
+  PaymentErrorCode,
+} from "./requester/fetch.js";
