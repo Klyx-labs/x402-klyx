@@ -39,6 +39,11 @@ import type {
 } from "../core/types.js";
 import { X402_VERSION } from "../core/types.js";
 import type { KleverNetwork, Scheme } from "../core/schemes/index.js";
+import {
+  SCHEME_EXACT,
+  SCHEME_KLYX_ESCROW,
+} from "../core/schemes/index.js";
+import type { ReceiptEmitter } from "../receipts/emitter.js";
 
 // Augment express Request so downstream handlers can read
 // `req.x402?.payer` etc. with typed autocomplete. Optional field —
@@ -108,6 +113,25 @@ export interface PaymentMiddlewareOptions {
    * background worker polling receipts, or a manual reconcile job).
    */
   autoSettle?: boolean;
+  /**
+   * Optional ReceiptEmitter — if set, fires an ADR-013 receipt to
+   * Klyx after each 2xx completion. Non-2xx responses skip both
+   * settle and receipt (client got an error → don't record it as a
+   * completed invocation). Emission is fire-and-forget; failures
+   * surface via the emitter's `onError` hook, never as request
+   * failures.
+   *
+   * Wire this in so receipts are the DEFAULT path for your agent
+   * — that's the point of the reputation flywheel. Skipping is a
+   * per-agent design decision, not a per-payment default.
+   */
+  receiptEmitter?: ReceiptEmitter;
+  /**
+   * Optional endpoint UUID for the receipt's providerEndpointId
+   * field. Only meaningful when `receiptEmitter` is set. Leave
+   * unset if this route doesn't map to a registered Klyx endpoint.
+   */
+  providerEndpointId?: string;
 }
 
 export function paymentMiddleware(
@@ -128,6 +152,9 @@ export function paymentMiddleware(
   const autoSettle = opts.autoSettle ?? true;
 
   return async (req, res, next) => {
+    // Capture invocation start time BEFORE any I/O so the receipt's
+    // invokedAt reflects when the request actually landed.
+    const invokedAt = new Date().toISOString();
     const paymentHeader = req.header("x-payment");
 
     if (!paymentHeader) {
@@ -224,29 +251,79 @@ export function paymentMiddleware(
       requirements: paymentRequirements,
     };
 
-    if (autoSettle) {
+    if (autoSettle || opts.receiptEmitter) {
       res.on("finish", () => {
-        // Only settle on 2xx. Non-2xx = client got an error;
-        // charging them for a failed request would be wrong.
-        if (res.statusCode >= 200 && res.statusCode < 300) {
-          opts.facilitator
-            .settle({
-              x402Version: X402_VERSION,
-              paymentPayload,
-              paymentRequirements,
-            })
-            .catch(() => {
-              // Silent — settlement failure is out-of-band. A
-              // production consumer should either handle this
-              // (attach a logger via a wrapper) or run a
-              // reconciliation worker.
+        // Only settle + emit on 2xx. Non-2xx = client got an
+        // error; charging them for a failed request or emitting
+        // a "completed" receipt would both be wrong.
+        if (res.statusCode < 200 || res.statusCode >= 300) return;
+
+        // Fire settle in the background (if enabled). Capture
+        // the settle response so the receipt can include the
+        // tx hash. `.catch(() => null)` here means a settle
+        // failure DOES NOT block receipt emission — the receipt
+        // is still meaningful without the tx hash and can be
+        // reconciled later.
+        const settlePromise: Promise<{
+          body: { transaction?: string };
+        } | null> = autoSettle
+          ? opts.facilitator
+              .settle({
+                x402Version: X402_VERSION,
+                paymentPayload,
+                paymentRequirements,
+              })
+              .catch(() => null)
+          : Promise.resolve(null);
+
+        if (opts.receiptEmitter) {
+          const emitter = opts.receiptEmitter;
+          const nonce = (paymentPayload.payload as { nonce?: unknown })
+            .nonce;
+          if (typeof nonce === "string" && nonce.length > 0) {
+            const requesterAgentUserId = req.header(
+              "x-klyx-requester-agent",
+            );
+            settlePromise.then((settleRes) => {
+              void emitter.emit({
+                outcome: "completed",
+                requesterWallet: payer || undefined,
+                requesterAgentUserId: requesterAgentUserId || undefined,
+                paymentAsset: paymentRequirements.asset,
+                paymentAmountSmallest:
+                  paymentRequirements.maxAmountRequired,
+                paymentTxHash: settleRes?.body.transaction,
+                settlementType: mapSettlementType(paymentPayload.scheme),
+                invokedAt,
+                completedAt: new Date().toISOString(),
+                nonce,
+                capability: paymentRequirements.description,
+                providerEndpointId: opts.providerEndpointId,
+              });
             });
+          }
+          // If nonce is somehow missing (schema violation the
+          // facilitator would have caught, but defensive), skip
+          // the receipt silently. The middleware's contract to
+          // the caller is unaffected.
         }
       });
     }
 
     next();
   };
+}
+
+/** Map an x402 scheme to the receipt schema's settlementType.
+ *  Unrecognized schemes default to "external" — the receipt schema
+ *  supports it; used when a facilitator routes payment through a
+ *  non-Klever chain (base/solana/etc.) in a future scheme. */
+function mapSettlementType(
+  scheme: string,
+): "direct" | "managed" | "external" {
+  if (scheme === SCHEME_EXACT) return "direct";
+  if (scheme === SCHEME_KLYX_ESCROW) return "managed";
+  return "external";
 }
 
 function respondWith402(

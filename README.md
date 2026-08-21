@@ -89,6 +89,63 @@ Behavior:
 - On a 2xx response → `/settle` fires in the background (disable with `autoSettle: false`)
 - On any facilitator transport / signature failure → HTTP 502 with structured `code`
 
+### Receipts — feeding on-chain agent reputation
+
+Every settled x402 payment can emit a signed receipt to the Klyx API — that's what feeds `AgentValue` (the on-chain reputation score) and makes your agent discoverable + trustable. Wire the emitter into `paymentMiddleware` as an opt-in and it fires automatically after every 2xx completion:
+
+```ts
+import { createReceiptEmitter, paymentMiddleware } from 'x402-klyx';
+
+const receiptEmitter = createReceiptEmitter({
+  klyxApiUrl: 'https://klyx.space',
+  authToken: process.env.KLYX_JWT!,          // provider agent's JWT
+  providerAgentUserId: 'agent-uuid-here',    // your agentUserId in Klyx
+  wallet: {                                   // signs the klv-ed25519 attestation
+    address: 'klv1yourwallet...',
+    privateKeyHex: process.env.KLYX_WALLET_PRIVATE_KEY!,
+  },
+  onError: (err, receipt) => {
+    // Failed emissions do NOT block your response; log/alert here.
+    console.error(`receipt emission failed (${err.code})`, receipt.nonce);
+  },
+});
+
+app.get('/summarize', paymentMiddleware({
+  facilitator,
+  facilitatorUrl: 'https://facilitator.klyx.space',
+  payTo: 'klv1yourwallet...',
+  accepts: [{ scheme: SCHEME_EXACT, network: NETWORK_KLEVER_TESTNET, price: '500000', asset: 'KLV' }],
+  receiptEmitter,                              // ← wire it in
+  providerEndpointId: 'endpoint-uuid-here',   // optional
+}), (req, res) => {
+  res.json({ summary: '...' });
+});
+```
+
+Behavior:
+- Fires on 2xx completion (non-2xx skips — client got an error, no receipt)
+- Non-blocking — the emitter is fire-and-forget; a Klyx API outage doesn't break your endpoint
+- Signs each receipt with your wallet's ed25519 key (klv-ed25519 scheme per ADR-017 D17)
+- Deduplicates via the x402 payment nonce (409 on collision = already recorded = no-op)
+- Retries transport errors with backoff; skips retries for deterministic failures (401, 409, 400)
+
+Standalone use (without the middleware):
+
+```ts
+const result = await receiptEmitter.emit({
+  outcome: 'completed',
+  requesterWallet: 'klv1requester...',
+  paymentAsset: 'KLV',
+  paymentAmountSmallest: '500000',
+  paymentTxHash: '...',
+  settlementType: 'direct',
+  invokedAt: '2026-08-21T15:00:00Z',
+  completedAt: '2026-08-21T15:00:01Z',
+  nonce: 'aaaa...',
+});
+// { receiptId: '...', state: 'signed' } | null (on error)
+```
+
 ### Requester — calling paid agents (fetch)
 
 ```ts
