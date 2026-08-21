@@ -23,11 +23,13 @@ Not on npm yet. Install directly from git:
 
 ```bash
 # Pinned to a release tag (recommended)
-npm install github:Klyx-labs/x402-klyx#v0.1.0
+npm install github:Klyx-labs/x402-klyx#v0.2.0
 
 # Or a specific commit
 npm install github:Klyx-labs/x402-klyx#<sha>
 ```
+
+**Migrating from v0.1?** The wallet interface changed to a callback shape — see [Migrating from v0.1](#migrating-from-v01) at the bottom.
 
 Also works with `pnpm add` and `yarn add`. TypeScript source auto-builds on install via the `prepare` script.
 
@@ -94,16 +96,16 @@ Behavior:
 Every settled x402 payment can emit a signed receipt to the Klyx API — that's what feeds `AgentValue` (the on-chain reputation score) and makes your agent discoverable + trustable. Wire the emitter into `paymentMiddleware` as an opt-in and it fires automatically after every 2xx completion:
 
 ```ts
-import { createReceiptEmitter, paymentMiddleware } from 'x402-klyx';
+import { createReceiptEmitter, fromPrivateKey, paymentMiddleware } from 'x402-klyx';
 
 const receiptEmitter = createReceiptEmitter({
   klyxApiUrl: 'https://klyx.space',
   authToken: process.env.KLYX_JWT!,          // provider agent's JWT
   providerAgentUserId: 'agent-uuid-here',    // your agentUserId in Klyx
-  wallet: {                                   // signs the klv-ed25519 attestation
-    address: 'klv1yourwallet...',
-    privateKeyHex: process.env.KLYX_WALLET_PRIVATE_KEY!,
-  },
+  wallet: fromPrivateKey(                     // signs the klv-ed25519 attestation
+    process.env.KLYX_WALLET_PRIVATE_KEY!,
+    'klv1yourwallet...',
+  ),
   onError: (err, receipt) => {
     // Failed emissions do NOT block your response; log/alert here.
     console.error(`receipt emission failed (${err.code})`, receipt.nonce);
@@ -148,13 +150,15 @@ const result = await receiptEmitter.emit({
 
 ### Requester — calling paid agents (fetch)
 
-```ts
-import { withPaymentInterceptor } from 'x402-klyx';
+**Server-side agent (in-process key):**
 
-const wallet = {
-  address: 'klv1yourwallet...',
-  privateKeyHex: process.env.KLYX_WALLET_PRIVATE_KEY!,  // 32-byte hex
-};
+```ts
+import { withPaymentInterceptor, fromPrivateKey } from 'x402-klyx';
+
+const wallet = fromPrivateKey(
+  process.env.KLYX_WALLET_PRIVATE_KEY!,  // 32-byte hex
+  'klv1yourwallet...',
+);
 
 const paidFetch = withPaymentInterceptor(fetch, wallet, {
   maxAmount: '5000000',  // safety cap: 5 KLV per call max
@@ -163,30 +167,79 @@ const paidFetch = withPaymentInterceptor(fetch, wallet, {
   },
 });
 
-// Drop-in wherever you'd normally use fetch. If the endpoint
-// returns 402, the interceptor builds + signs a klever-exact
-// payload and retries automatically.
-const res = await paidFetch('https://agent.example/summarize', {
-  method: 'POST',
-  body: JSON.stringify({ url: '...' }),
-  headers: { 'content-type': 'application/json' },
-});
-
-if (res.status === 200) {
-  const data = await res.json();
-  // ...
-}
+const res = await paidFetch('https://agent.example/summarize');
 ```
 
+**Browser / wallet-extension flow (no private key in-process):**
+
+```ts
+import { withPaymentInterceptor, type KleverWallet } from 'x402-klyx';
+
+// Wrap whatever your wallet extension exposes for message-signing.
+// The library gives you canonical bytes; you return 128-char hex.
+const wallet: KleverWallet = {
+  address: extensionAccount.address,
+  publicKeyHex: extensionAccount.publicKeyHex,
+  async sign(canonicalBody) {
+    // Popup shows the canonical JSON to the user. On approval:
+    return await extension.signMessage(canonicalBody);
+  },
+};
+
+const paidFetch = withPaymentInterceptor(fetch, wallet, { maxAmount: '5000000' });
+```
+
+Same shape works for hardware wallets (Ledger), remote KMS/HSM signers, or anywhere else the caller shouldn't hand raw keys to the library.
+
 Behavior:
-- **Non-402 responses pass through unchanged** — no fetch overhead when the endpoint isn't gated
-- **On 402** — parses `paymentOptions[]`, picks a `klever-exact` entry matching your preferred network, enforces `maxAmount`, builds + signs a payload with your wallet's ed25519 key, retries with `X-PAYMENT` set
+- **Non-402 responses pass through unchanged** — no overhead when the endpoint isn't gated
+- **On 402** — parses `paymentOptions[]`, picks a `klever-exact` entry matching your preferred network, enforces `maxAmount`, builds + signs (via `wallet.sign`), retries with `X-PAYMENT` set
 - **Second 402 surfaces to caller** — no infinite loop; you decide whether to retry manually
-- **Errors throw `PaymentError`** with a stable `code` enum: `malformed_402`, `no_compatible_option`, `amount_over_cap`, `unsupported_scheme_client`, `wallet_error`
+- **Errors throw `PaymentError`** with a stable `code` enum: `malformed_402`, `no_compatible_option`, `amount_over_cap`, `unsupported_scheme_client`, `wallet_error` (covers wallet decline / hardware timeout / malformed sig return)
 
 Not in v0:
 - `klyx-escrow` scheme (requires on-chain openEscrow tx submission — use `buildKlyxEscrowPayload` from core after submitting the tx yourself)
-- Callback-style wallet signing (only in-process `privateKeyHex` today; wallet-extension bridges land in a follow-up)
+
+## Migrating from v0.1
+
+v0.2 changes the wallet interface from `{ address, privateKeyHex }` to a callback-based `KleverWallet` so browser, hardware-wallet, and remote-KMS flows work — not just in-process private keys.
+
+**Before (v0.1):**
+
+```ts
+const wallet = {
+  address: 'klv1...',
+  privateKeyHex: process.env.KLYX_KEY!,
+};
+const paidFetch = withPaymentInterceptor(fetch, wallet);
+```
+
+**After (v0.2):** wrap in the `fromPrivateKey` helper —
+
+```ts
+import { fromPrivateKey } from 'x402-klyx';
+
+const wallet = fromPrivateKey(process.env.KLYX_KEY!, 'klv1...');
+const paidFetch = withPaymentInterceptor(fetch, wallet);
+```
+
+Same effect, single-line change. `fromPrivateKey` is a thin adapter that derives the pubkey once at construction and implements `sign()` as the same SHA-256 + ed25519 primitive the library used internally in v0.1.
+
+**Wallet-extension flow (new capability, no v0.1 equivalent):**
+
+```ts
+const wallet: KleverWallet = {
+  address, publicKeyHex,
+  async sign(canonicalBody) { return await extension.signMessage(canonicalBody); },
+};
+```
+
+Applies to both `withPaymentInterceptor` and `createReceiptEmitter` — same wallet type, same migration.
+
+Other v0.2 changes:
+- `buildAndSignKleverExactPayload` is now `async` — `await` it (was sync). The exported input type dropped `signer` and `privateKeyHex`; now takes a single `wallet` field.
+- `wallet.sign()` return values are validated (128-char lowercase hex, per klv-ed25519). A malformed return throws with a clear error instead of producing garbage signatures the facilitator silently rejects.
+- Input validation runs BEFORE `wallet.sign()` is invoked — so a bad payload no longer wastes a hardware-wallet button-press.
 
 ## Ecosystem
 

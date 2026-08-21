@@ -14,10 +14,11 @@
 
 import { z } from "zod";
 import { canonicalize } from "../canonicalize.js";
-import { signAttestation, derivePublicKey } from "../signing.js";
 import type { PaymentPayload } from "../types.js";
 import { X402_VERSION } from "../types.js";
 import { SCHEME_EXACT, type KleverNetwork } from "./index.js";
+import type { KleverWallet } from "../wallet.js";
+import { assertValidSignatureHex } from "../wallet.js";
 
 // ── Payload shape ──────────────────────────────────────────────
 //
@@ -50,6 +51,22 @@ const kleverExactPayloadSchema = z.object({
 
 export type KleverExactPayload = z.infer<typeof kleverExactPayloadSchema>;
 
+// Input-only schema for the builder — validates caller-supplied
+// fields BEFORE we invoke wallet.sign (which may pop up a browser
+// extension or wake a hardware wallet). Fail fast on bad input
+// instead of asking the user to approve a garbage payload.
+const kleverExactBuildInputSchema = z.object({
+  asset: z.string().min(1).max(64),
+  amount: z
+    .string()
+    .regex(bigIntString, "amount must be a base-10 integer string"),
+  destination: z
+    .string()
+    .regex(kleverBech32, "destination must be a lowercase klv1 bech32 address"),
+  nonce: z.string().regex(hexOnly).min(32).max(128),
+  expiresAt: z.string().datetime({ offset: true }),
+});
+
 /**
  * Canonicalize a payload for attestation. MUST drop
  * `authorization.attestation` — the wallet couldn't have signed a
@@ -66,8 +83,8 @@ export function canonicalizeForAttestation(
 
 /**
  * Inputs to `buildAndSignKleverExactPayload` — the wallet-facing
- * fields, minus the derived ones (publicKey, attestation) which
- * this builder fills in.
+ * fields, minus derived ones (publicKey, attestation) which this
+ * builder fills in from `wallet`.
  */
 export interface KleverExactBuildInput {
   /** Klever asset id (e.g. "KLV" or "KDA-XXXX"). */
@@ -80,26 +97,42 @@ export interface KleverExactBuildInput {
   nonce: string;
   /** ISO 8601 timestamp with offset, in the future. */
   expiresAt: string;
-  /** klv1… bech32 address of the requester wallet. */
-  signer: string;
-  /** Ed25519 private key hex (32 bytes / 64 chars). */
-  privateKeyHex: string;
+  /**
+   * Wallet that signs the attestation. Its `.address` populates
+   * `authorization.signer`, `.publicKeyHex` populates
+   * `authorization.publicKey`, and `.sign(canonicalBody)` produces
+   * the `authorization.attestation` hex. Sync or async — the
+   * builder awaits either.
+   */
+  wallet: KleverWallet;
 }
 
 /**
- * Build + sign a klever-exact payload. Returns a wire-ready
- * PaymentPayload envelope with the attestation filled in.
+ * Build + sign a klever-exact payload. Async so wallet extensions,
+ * hardware wallets, and remote signers work — in-process wallets
+ * (via `fromPrivateKey`) resolve synchronously and the caller just
+ * awaits.
  *
- * Throws (via zod) on malformed inputs — bad bech32, non-integer
- * amount, past `expiresAt`, wrong-length key. This is intentional:
- * dev errors should surface at build time, not as a `isValid=false`
- * from the facilitator two RTTs later.
+ * Throws on malformed inputs — bad bech32, non-integer amount, past
+ * `expiresAt`, wrong-length key. Dev errors should surface at build
+ * time, not as an opaque `isValid=false` from the facilitator two
+ * RTTs later.
  */
-export function buildAndSignKleverExactPayload(
+export async function buildAndSignKleverExactPayload(
   input: KleverExactBuildInput,
   network: KleverNetwork,
-): PaymentPayload {
-  const publicKey = derivePublicKey(input.privateKeyHex);
+): Promise<PaymentPayload> {
+  // Validate caller inputs upfront — before the wallet callback
+  // is invoked. A hardware-wallet popup for a bad payload wastes
+  // the user's time; catching malformed input synchronously with
+  // a clear zod error is much friendlier.
+  kleverExactBuildInputSchema.parse({
+    asset: input.asset,
+    amount: input.amount,
+    destination: input.destination,
+    nonce: input.nonce,
+    expiresAt: input.expiresAt,
+  });
   const unsigned = {
     asset: input.asset,
     amount: input.amount,
@@ -107,22 +140,20 @@ export function buildAndSignKleverExactPayload(
     nonce: input.nonce,
     expiresAt: input.expiresAt,
     authorization: {
-      signer: input.signer,
-      publicKey,
+      signer: input.wallet.address,
+      publicKey: input.wallet.publicKeyHex,
     },
   };
   const canonicalBody = canonicalizeForAttestation(unsigned);
-  const attestation = signAttestation({
-    canonicalBody,
-    privateKeyHex: input.privateKeyHex,
-  });
+  const attestation = await input.wallet.sign(canonicalBody);
+  // Fail loud on a wallet that returned garbage — otherwise the
+  // facilitator returns invalid_signature and the caller has to
+  // dig into the wallet adapter to find the bug.
+  assertValidSignatureHex(attestation);
   const payload: KleverExactPayload = {
     ...unsigned,
     authorization: { ...unsigned.authorization, attestation },
   };
-  // Shape-check the fully assembled payload — belt + braces. Catches
-  // a malformed input that slipped past the individual checks above.
-  kleverExactPayloadSchema.parse(payload);
   return {
     x402Version: X402_VERSION,
     scheme: SCHEME_EXACT,

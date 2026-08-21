@@ -3,7 +3,9 @@ import { sha256 } from "@noble/hashes/sha256";
 
 import {
   createReceiptEmitter,
+  fromPrivateKey,
   ReceiptError,
+  type KleverWallet,
   type ReceiptInput,
   type ReceiptEmitter,
 } from "../src/index.js";
@@ -61,7 +63,7 @@ function makeEmitter(
     klyxApiUrl: KLYX_URL,
     authToken: JWT,
     providerAgentUserId: PROVIDER_UUID,
-    wallet: { address: PROVIDER_WALLET, privateKeyHex: TEST_PRIVATE_KEY },
+    wallet: fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET),
     fetch: fetchImpl,
     retries: 0,
     ...overrides,
@@ -75,7 +77,7 @@ describe("createReceiptEmitter — constructor validation", () => {
         klyxApiUrl: "",
         authToken: JWT,
         providerAgentUserId: PROVIDER_UUID,
-        wallet: { address: PROVIDER_WALLET, privateKeyHex: TEST_PRIVATE_KEY },
+        wallet: fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET),
       }),
     ).toThrow(/klyxApiUrl required/);
   });
@@ -86,7 +88,7 @@ describe("createReceiptEmitter — constructor validation", () => {
         klyxApiUrl: KLYX_URL,
         authToken: "",
         providerAgentUserId: PROVIDER_UUID,
-        wallet: { address: PROVIDER_WALLET, privateKeyHex: TEST_PRIVATE_KEY },
+        wallet: fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET),
       }),
     ).toThrow(/authToken required/);
   });
@@ -97,31 +99,119 @@ describe("createReceiptEmitter — constructor validation", () => {
         klyxApiUrl: KLYX_URL,
         authToken: JWT,
         providerAgentUserId: "",
-        wallet: { address: PROVIDER_WALLET, privateKeyHex: TEST_PRIVATE_KEY },
+        wallet: fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET),
       }),
     ).toThrow(/providerAgentUserId required/);
   });
 
   it("throws on wallet without address", () => {
+    const w = fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET);
     expect(() =>
       createReceiptEmitter({
         klyxApiUrl: KLYX_URL,
         authToken: JWT,
         providerAgentUserId: PROVIDER_UUID,
-        wallet: { address: "", privateKeyHex: TEST_PRIVATE_KEY },
+        wallet: { ...w, address: "" },
       }),
     ).toThrow(/wallet\.address required/);
   });
 
-  it("throws on wallet without privateKeyHex", () => {
+  it("throws on wallet without publicKeyHex", () => {
+    const w = fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET);
     expect(() =>
       createReceiptEmitter({
         klyxApiUrl: KLYX_URL,
         authToken: JWT,
         providerAgentUserId: PROVIDER_UUID,
-        wallet: { address: PROVIDER_WALLET, privateKeyHex: "" },
+        wallet: { ...w, publicKeyHex: "" },
       }),
-    ).toThrow(/wallet\.privateKeyHex required/);
+    ).toThrow(/wallet\.publicKeyHex required/);
+  });
+
+  it("throws when wallet.sign is not a function", () => {
+    const w = fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET);
+    expect(() =>
+      createReceiptEmitter({
+        klyxApiUrl: KLYX_URL,
+        authToken: JWT,
+        providerAgentUserId: PROVIDER_UUID,
+        wallet: { ...w, sign: undefined as unknown as KleverWallet["sign"] },
+      }),
+    ).toThrow(/sign function required/);
+  });
+});
+
+describe("createReceiptEmitter — wallet-extension flow", () => {
+  it("supports async wallet.sign callback", async () => {
+    const inProcess = fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET);
+    const asyncWallet: KleverWallet = {
+      address: inProcess.address,
+      publicKeyHex: inProcess.publicKeyHex,
+      sign: async (body) => {
+        await new Promise((r) => setTimeout(r, 3));
+        return inProcess.sign(body) as string;
+      },
+    };
+    const fetchImpl = mockFetch([
+      { status: 201, body: { receipt: { receiptId: "r-async", state: "signed" } } },
+    ]);
+    const emitter = createReceiptEmitter({
+      klyxApiUrl: KLYX_URL,
+      authToken: JWT,
+      providerAgentUserId: PROVIDER_UUID,
+      wallet: asyncWallet,
+      fetch: fetchImpl as unknown as typeof fetch,
+      retries: 0,
+    });
+    const result = await emitter.emit(baseReceipt());
+    expect(result?.receiptId).toBe("r-async");
+  });
+
+  it("surfaces wallet.sign throwing as malformed_receipt (no retry)", async () => {
+    const onError = vi.fn();
+    const brokenWallet: KleverWallet = {
+      address: PROVIDER_WALLET,
+      publicKeyHex: TEST_PUBLIC_KEY,
+      sign: () => {
+        throw new Error("hardware wallet timeout");
+      },
+    };
+    const fetchImpl = mockFetch([]);
+    const emitter = createReceiptEmitter({
+      klyxApiUrl: KLYX_URL,
+      authToken: JWT,
+      providerAgentUserId: PROVIDER_UUID,
+      wallet: brokenWallet,
+      fetch: fetchImpl as unknown as typeof fetch,
+      retries: 3,
+      onError,
+    });
+    const result = await emitter.emit(baseReceipt());
+    expect(result).toBeNull();
+    expect(fetchImpl).not.toHaveBeenCalled();  // never even POSTed
+    expect(onError.mock.calls[0][0].code).toBe("malformed_receipt");
+    expect(onError.mock.calls[0][0].message).toContain("hardware wallet timeout");
+  });
+
+  it("surfaces wallet returning malformed sig as malformed_receipt", async () => {
+    const onError = vi.fn();
+    const brokenWallet: KleverWallet = {
+      address: PROVIDER_WALLET,
+      publicKeyHex: TEST_PUBLIC_KEY,
+      sign: () => "not-a-real-signature",
+    };
+    const fetchImpl = mockFetch([]);
+    const emitter = createReceiptEmitter({
+      klyxApiUrl: KLYX_URL,
+      authToken: JWT,
+      providerAgentUserId: PROVIDER_UUID,
+      wallet: brokenWallet,
+      fetch: fetchImpl as unknown as typeof fetch,
+      onError,
+    });
+    const result = await emitter.emit(baseReceipt());
+    expect(result).toBeNull();
+    expect(onError.mock.calls[0][0].code).toBe("malformed_receipt");
   });
 });
 
@@ -224,7 +314,7 @@ describe("createReceiptEmitter.emit — happy path", () => {
       klyxApiUrl: "https://klyx.example///",
       authToken: JWT,
       providerAgentUserId: PROVIDER_UUID,
-      wallet: { address: PROVIDER_WALLET, privateKeyHex: TEST_PRIVATE_KEY },
+      wallet: fromPrivateKey(TEST_PRIVATE_KEY, PROVIDER_WALLET),
       fetch: fetchImpl as unknown as typeof fetch,
     });
     await emitter.emit(baseReceipt());
