@@ -26,8 +26,14 @@ import { SCHEME_EXACT, type KleverNetwork } from "./index.js";
 // signature-verify failure downstream.
 
 const kleverBech32 = /^klv1[0-9a-z]{38,}$/;
-const hexOnly = /^[0-9a-fA-F]+$/;
-const bigIntString = /^\d+$/;
+// Lowercase-only. Canonicalization preserves string case in JSON;
+// a lowercasing middleware would silently break attestations
+// otherwise. Matches facilitator per docs/x402-parity.md.
+const hexOnly = /^[0-9a-f]+$/;
+// Bounded to u128-max digit count (~40). Unbounded `\d+` let a
+// caller submit a 10M-digit amount and DoS the facilitator on
+// BigInt() parse — same schema is shared, so bound here too.
+const bigIntString = /^\d{1,40}$/;
 
 const kleverExactPayloadSchema = z.object({
   asset: z.string().min(1).max(64),

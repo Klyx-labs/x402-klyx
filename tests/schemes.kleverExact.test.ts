@@ -113,6 +113,28 @@ describe("buildAndSignKleverExactPayload", () => {
       ),
     ).toThrow();
   });
+
+  it("rejects uppercase hex in nonce (lowercase-only per parity #608)", () => {
+    // Canonicalization preserves case; a lowercasing middleware
+    // would silently break attestations if we accepted mixed case.
+    expect(() =>
+      buildAndSignKleverExactPayload(
+        { ...baseInput(), nonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).toThrow();
+  });
+
+  it("rejects amounts longer than 40 digits (u128 bound per #610)", () => {
+    // Unbounded /^\d+$/ would let a caller DoS the facilitator with
+    // a 10M-digit amount that stalls on BigInt() parse.
+    expect(() =>
+      buildAndSignKleverExactPayload(
+        { ...baseInput(), amount: "1".repeat(41) },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).toThrow(/amount/);
+  });
 });
 
 describe("parseKleverExactPayload", () => {

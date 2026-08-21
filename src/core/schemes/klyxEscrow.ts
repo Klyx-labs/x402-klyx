@@ -19,9 +19,10 @@ import { X402_VERSION } from "../types.js";
 import { SCHEME_KLYX_ESCROW, type KleverNetwork } from "./index.js";
 
 const kleverBech32 = /^klv1[0-9a-z]{38,}$/;
-const hexOnly = /^[0-9a-fA-F]+$/;
-const bigIntString = /^\d+$/;
-const txHash = /^[0-9a-fA-F]{40,128}$/;
+// Lowercase-only + bounded — matches kleverExact.ts.
+const hexOnly = /^[0-9a-f]+$/;
+const bigIntString = /^\d{1,40}$/;
+const txHash = /^[0-9a-f]{40,128}$/;
 
 const klyxEscrowPayloadSchema = z.object({
   asset: z.string().min(1).max(64),

@@ -23,6 +23,19 @@ describe("hex helpers", () => {
   it("rejects odd-length hex", () => {
     expect(() => hexToBytes("abc")).toThrow(/odd-length/);
   });
+
+  it("rejects non-hex characters (previously silent NaN → 0x00)", () => {
+    // parseInt("gg", 16) returns NaN which coerces to 0 in a
+    // Uint8Array; a typo silently produced wrong bytes before this
+    // guard. See parity issue #607.
+    expect(() => hexToBytes("gg")).toThrow(/non-hex/);
+    expect(() => hexToBytes("00zz00zz")).toThrow(/non-hex/);
+    // Even-length hex with a non-hex nibble in the middle — used
+    // to silently zero that byte, now throws.
+    expect(() => hexToBytes("00".repeat(15) + "gg" + "00".repeat(16))).toThrow(
+      /non-hex/,
+    );
+  });
 });
 
 describe("derivePublicKey", () => {

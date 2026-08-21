@@ -27,6 +27,12 @@ export function hexToBytes(hex: string): Uint8Array {
   if (hex.length % 2 !== 0) {
     throw new Error("hexToBytes: odd-length hex string");
   }
+  // Reject non-hex chars up front — `parseInt("gg", 16)` returns
+  // NaN which coerces to 0 when assigned to a Uint8Array slot.
+  // A typo in a hex key silently produced wrong bytes otherwise.
+  if (!/^[0-9a-fA-F]*$/.test(hex)) {
+    throw new Error("hexToBytes: non-hex characters");
+  }
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) {
     out[i] = parseInt(hex.substring(i * 2, i * 2 + 2), 16);

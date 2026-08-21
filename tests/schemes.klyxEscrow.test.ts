@@ -75,6 +75,24 @@ describe("buildKlyxEscrowPayload", () => {
       ),
     ).toThrow();
   });
+
+  it("rejects uppercase openEscrowTx (lowercase-only per parity #608)", () => {
+    expect(() =>
+      buildKlyxEscrowPayload(
+        { ...baseInput(), openEscrowTx: "DEADBEEF".repeat(8) },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).toThrow();
+  });
+
+  it("rejects amounts longer than 40 digits (u128 bound per #610)", () => {
+    expect(() =>
+      buildKlyxEscrowPayload(
+        { ...baseInput(), amount: "9".repeat(41) },
+        NETWORK_KLEVER_TESTNET,
+      ),
+    ).toThrow();
+  });
 });
 
 describe("parseKlyxEscrowPayload", () => {
