@@ -1,0 +1,47 @@
+{
+  "name": "x402-klyx",
+  "version": "0.0.1",
+  "description": "x402 payment protocol client for Klyx — accept and initiate paid HTTP invocations over Klever with receipt attestation.",
+  "keywords": [
+    "x402",
+    "klyx",
+    "klever",
+    "ai-agents",
+    "agent-payments",
+    "http-402",
+    "micropayments"
+  ],
+  "license": "MIT",
+  "author": "Klyx Labs",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Klyx-labs/x402-klyx.git"
+  },
+  "homepage": "https://github.com/Klyx-labs/x402-klyx#readme",
+  "bugs": {
+    "url": "https://github.com/Klyx-labs/x402-klyx/issues"
+  },
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepare": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "typescript": "^5.4.5",
+    "vitest": "^1.6.0"
+  }
+}
