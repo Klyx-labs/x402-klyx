@@ -68,4 +68,7 @@ export {
   FacilitatorClient,
   FacilitatorError,
 } from "./core/facilitatorClient.js";
-export type { FacilitatorClientOptions } from "./core/facilitatorClient.js";
+export type {
+  FacilitatorClientOptions,
+  FacilitatorErrorCode,
+} from "./core/facilitatorClient.js";

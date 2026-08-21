@@ -123,11 +123,12 @@ describe("FacilitatorClient.verify", () => {
     expect(res.publicKeyHex).toBe(TEST_PUBLIC_KEY);
   });
 
-  it("skips signature checks when publicKeysHex is empty (dev mode)", async () => {
+  it("skips signature checks when publicKeysHex is empty + allowUnsigned (dev mode)", async () => {
     const fetchImpl = mockFetch(200, { isValid: true }, { sign: false });
     const client = new FacilitatorClient({
       url: "https://facilitator.example",
       publicKeysHex: [],
+      allowUnsigned: true,
       fetch: fetchImpl,
     });
     const res = await client.verify(REQUEST);
@@ -200,6 +201,196 @@ describe("FacilitatorClient.verify", () => {
       "https://facilitator.example/verify",
       expect.any(Object),
     );
+  });
+});
+
+describe("FacilitatorClient constructor validation (#609/#612 hardening)", () => {
+  const fetchImpl = mockFetch(200, { isValid: true }, { sign: true });
+
+  it("throws on empty publicKeysHex without allowUnsigned (#609)", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "https://facilitator.example",
+          publicKeysHex: [],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/allowUnsigned/);
+  });
+
+  it("throws on malformed key in publicKeysHex (empty string)", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "https://facilitator.example",
+          publicKeysHex: [""],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/publicKeysHex\[0\]/);
+  });
+
+  it("throws on uppercase key in publicKeysHex (lowercase-only per parity)", () => {
+    const upper = TEST_PUBLIC_KEY.toUpperCase();
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "https://facilitator.example",
+          publicKeysHex: [upper],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/lowercase hex/);
+  });
+
+  it("throws on wrong-length key in publicKeysHex", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "https://facilitator.example",
+          publicKeysHex: ["aabbcc"],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/32-byte/);
+  });
+
+  it("throws on non-http(s) URL scheme (#612)", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "ftp://facilitator.example",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/unsupported protocol/);
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "file:///etc/passwd",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/unsupported protocol/);
+  });
+
+  it("throws on unparseable URL", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "not-a-url",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/invalid url/);
+  });
+
+  it("throws on localhost without allowPrivateTargets (#612)", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "http://localhost:9082",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/private\/loopback/);
+  });
+
+  it("throws on RFC1918 hosts without allowPrivateTargets", () => {
+    for (const host of ["10.0.0.1", "172.16.0.1", "192.168.1.1", "127.0.0.1"]) {
+      expect(
+        () =>
+          new FacilitatorClient({
+            url: `http://${host}:9082`,
+            publicKeysHex: [TEST_PUBLIC_KEY],
+            fetch: fetchImpl,
+          }),
+      ).toThrow(/private\/loopback/);
+    }
+  });
+
+  it("throws on AWS-metadata link-local (169.254.169.254)", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "http://169.254.169.254/latest/api/token",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/private\/loopback/);
+  });
+
+  it("accepts private host with allowPrivateTargets: true (dev docker)", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "http://facilitator:9082",  // docker-compose service name (not numeric, not localhost)
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).not.toThrow();
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "http://localhost:9082",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          allowPrivateTargets: true,
+          fetch: fetchImpl,
+        }),
+    ).not.toThrow();
+  });
+
+  it("throws on missing url", () => {
+    expect(
+      () =>
+        new FacilitatorClient({
+          url: "",
+          publicKeysHex: [TEST_PUBLIC_KEY],
+          fetch: fetchImpl,
+        }),
+    ).toThrow(/url required/);
+  });
+});
+
+describe("FacilitatorClient response body caps (#611 hardening)", () => {
+  it("throws body_too_large when declared Content-Length exceeds cap", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response("{}", {
+        status: 200,
+        headers: new Headers({
+          "content-type": "application/json",
+          "content-length": String(128 * 1024),  // 128 KiB > 64 KiB cap
+          "x-klyx-facilitator-signature": "0".repeat(128),
+        }),
+      }),
+    );
+    const client = new FacilitatorClient({
+      url: "https://facilitator.example",
+      publicKeysHex: [TEST_PUBLIC_KEY],
+      fetch: fetchImpl,
+    });
+    await expect(client.verify(REQUEST)).rejects.toMatchObject({
+      code: "body_too_large",
+    });
+  });
+
+  it("throws body_too_large on actual oversized body when Content-Length was absent/lying", async () => {
+    const oversized = "x".repeat(65 * 1024);  // > 64 KiB
+    const fetchImpl = vi.fn(async () =>
+      new Response(oversized, {
+        status: 200,
+        headers: new Headers({
+          "content-type": "application/json",
+          // no content-length header — forces post-read check
+          "x-klyx-facilitator-signature": "0".repeat(128),
+        }),
+      }),
+    );
+    const client = new FacilitatorClient({
+      url: "https://facilitator.example",
+      publicKeysHex: [TEST_PUBLIC_KEY],
+      fetch: fetchImpl,
+    });
+    await expect(client.verify(REQUEST)).rejects.toMatchObject({
+      code: "body_too_large",
+    });
   });
 });
 
