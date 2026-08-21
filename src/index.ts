@@ -91,3 +91,19 @@ export type {
   PaymentAttemptInfo,
   PaymentErrorCode,
 } from "./requester/fetch.js";
+
+// Receipt emitter (Klyx reputation flywheel)
+export {
+  createReceiptEmitter,
+  ReceiptError,
+} from "./receipts/emitter.js";
+export type {
+  ReceiptEmitter,
+  ReceiptEmitterOptions,
+  ReceiptErrorCode,
+} from "./receipts/emitter.js";
+export type {
+  ReceiptInput,
+  EmittedReceipt,
+  AttestationScheme,
+} from "./receipts/types.js";

@@ -9,6 +9,9 @@ import {
   X402_VERSION,
   SCHEME_EXACT,
   NETWORK_KLEVER_TESTNET,
+  type ReceiptEmitter,
+  type EmittedReceipt,
+  type ReceiptInput,
 } from "../src/index.js";
 import { canonicalize } from "../src/core/canonicalize.js";
 import {
@@ -294,6 +297,117 @@ describe("paymentMiddleware — autoSettle behavior", () => {
     );
     expect(paths).toContain("/verify");
     expect(paths).not.toContain("/settle");
+  });
+});
+
+describe("paymentMiddleware — receiptEmitter integration", () => {
+  function makeCapturingEmitter(): {
+    emitter: ReceiptEmitter;
+    emits: ReceiptInput[];
+  } {
+    const emits: ReceiptInput[] = [];
+    const emitter: ReceiptEmitter = {
+      async emit(r) {
+        emits.push(r);
+        const result: EmittedReceipt = { receiptId: "r-test", state: "signed" };
+        return result;
+      },
+    };
+    return { emitter, emits };
+  }
+
+  it("fires the emitter on 2xx completion with derived fields", async () => {
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+      "/settle": {
+        body: {
+          success: true,
+          network: NETWORK_KLEVER_TESTNET,
+          payer: REQUESTER,
+          transaction: "deadbeef".repeat(8),
+        },
+      },
+    });
+    const { emitter, emits } = makeCapturingEmitter();
+    const app = makeApp(mockFetch as unknown as typeof fetch, {
+      receiptEmitter: emitter,
+      providerEndpointId: "22222222-2222-2222-2222-222222222222",
+    });
+    await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(SAMPLE_PAYLOAD));
+    await new Promise((r) => setTimeout(r, 30));  // let background emit + settle land
+
+    expect(emits).toHaveLength(1);
+    const r = emits[0];
+    expect(r.outcome).toBe("completed");
+    expect(r.requesterWallet).toBe(REQUESTER);
+    expect(r.paymentAsset).toBe("KLV");
+    expect(r.paymentAmountSmallest).toBe("500000");
+    expect(r.settlementType).toBe("direct");  // exact → direct
+    expect(r.nonce).toBe(SAMPLE_PAYLOAD.payload.nonce);
+    expect(r.providerEndpointId).toBe("22222222-2222-2222-2222-222222222222");
+    expect(r.capability).toBe("premium endpoint");  // from accepts.description
+    expect(r.paymentTxHash).toBe("deadbeef".repeat(8));  // from /settle
+    expect(r.invokedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(r.completedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("passes through X-Klyx-Requester-Agent header when present", async () => {
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+      "/settle": {
+        body: { success: true, network: NETWORK_KLEVER_TESTNET, payer: REQUESTER },
+      },
+    });
+    const { emitter, emits } = makeCapturingEmitter();
+    const app = makeApp(mockFetch as unknown as typeof fetch, {
+      receiptEmitter: emitter,
+    });
+    const agentId = "33333333-3333-3333-3333-333333333333";
+    await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(SAMPLE_PAYLOAD))
+      .set("X-Klyx-Requester-Agent", agentId);
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(emits[0].requesterAgentUserId).toBe(agentId);
+  });
+
+  it("does NOT fire the emitter on non-2xx (handler 500)", async () => {
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+    });
+    const { emitter, emits } = makeCapturingEmitter();
+    const app = makeApp(
+      mockFetch as unknown as typeof fetch,
+      { receiptEmitter: emitter },
+      500,
+    );
+    await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(SAMPLE_PAYLOAD));
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(emits).toHaveLength(0);
+  });
+
+  it("still fires the emitter when autoSettle: false (no tx hash)", async () => {
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+    });
+    const { emitter, emits } = makeCapturingEmitter();
+    const app = makeApp(mockFetch as unknown as typeof fetch, {
+      receiptEmitter: emitter,
+      autoSettle: false,
+    });
+    await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(SAMPLE_PAYLOAD));
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(emits).toHaveLength(1);
+    expect(emits[0].paymentTxHash).toBeUndefined();
   });
 });
 
