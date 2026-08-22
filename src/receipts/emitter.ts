@@ -355,7 +355,7 @@ async function postOnce(args: PostArgs): Promise<EmittedReceipt> {
     );
   }
 
-  let parsed: { receipt?: EmittedReceipt };
+  let parsed: { receipt?: Partial<EmittedReceipt> };
   try {
     parsed = JSON.parse(bodyText);
   } catch (err) {
@@ -364,14 +364,14 @@ async function postOnce(args: PostArgs): Promise<EmittedReceipt> {
       "malformed_response",
     );
   }
-  if (!parsed.receipt?.receiptId) {
+  if (!parsed.receipt?.id) {
     throw new ReceiptError(
-      "Klyx receipt response missing receipt.receiptId",
+      "Klyx receipt response missing receipt.id",
       "malformed_response",
     );
   }
   return {
-    receiptId: parsed.receipt.receiptId,
+    id: parsed.receipt.id,
     state: parsed.receipt.state ?? "signed",
   };
 }

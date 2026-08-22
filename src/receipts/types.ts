@@ -50,9 +50,14 @@ export interface ReceiptInput {
 /**
  * Klyx server DTO returned on a successful POST /api/agents/receipts.
  * Only the fields the emitter surfaces — the full DTO has more.
+ *
+ * Field name is `id` (matches the Klyx AgentReceiptDto column name),
+ * not `receiptId`. v0.2.0 shipped with `receiptId` which never
+ * verified against the actual server; the demo-x402 integration
+ * caught it. Patched in v0.2.1.
  */
 export interface EmittedReceipt {
-  receiptId: string;
+  id: string;
   /** State from the server. 'signed' if both sides attested;
    *  'pending_sigs' if only provider attested (requester can
    *  later add via POST /api/agents/receipts/:id/sign). */

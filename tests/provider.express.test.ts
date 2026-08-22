@@ -309,7 +309,7 @@ describe("paymentMiddleware — receiptEmitter integration", () => {
     const emitter: ReceiptEmitter = {
       async emit(r) {
         emits.push(r);
-        const result: EmittedReceipt = { receiptId: "r-test", state: "signed" };
+        const result: EmittedReceipt = { id: "r-test", state: "signed" };
         return result;
       },
     };

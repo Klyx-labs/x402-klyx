@@ -153,7 +153,7 @@ describe("createReceiptEmitter — wallet-extension flow", () => {
       },
     };
     const fetchImpl = mockFetch([
-      { status: 201, body: { receipt: { receiptId: "r-async", state: "signed" } } },
+      { status: 201, body: { receipt: { id: "r-async", state: "signed" } } },
     ]);
     const emitter = createReceiptEmitter({
       klyxApiUrl: KLYX_URL,
@@ -164,7 +164,7 @@ describe("createReceiptEmitter — wallet-extension flow", () => {
       retries: 0,
     });
     const result = await emitter.emit(baseReceipt());
-    expect(result?.receiptId).toBe("r-async");
+    expect(result?.id).toBe("r-async");
   });
 
   it("surfaces wallet.sign throwing as malformed_receipt (no retry)", async () => {
@@ -220,12 +220,12 @@ describe("createReceiptEmitter.emit — happy path", () => {
     const fetchImpl = mockFetch([
       {
         status: 201,
-        body: { receipt: { receiptId: "r-1234", state: "signed" } },
+        body: { receipt: { id: "r-1234", state: "signed" } },
       },
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch);
     const result = await emitter.emit(baseReceipt());
-    expect(result).toEqual({ receiptId: "r-1234", state: "signed" });
+    expect(result).toEqual({ id: "r-1234", state: "signed" });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
 
     const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
@@ -271,7 +271,7 @@ describe("createReceiptEmitter.emit — happy path", () => {
     const fetchImpl = mockFetch([
       {
         status: 201,
-        body: { receipt: { receiptId: "r-5678", state: "pending_sigs" } },
+        body: { receipt: { id: "r-5678", state: "pending_sigs" } },
       },
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch, {
@@ -280,14 +280,14 @@ describe("createReceiptEmitter.emit — happy path", () => {
     await emitter.emit(baseReceipt());
     expect(onEmit).toHaveBeenCalledTimes(1);
     const [result, receipt] = onEmit.mock.calls[0];
-    expect(result.receiptId).toBe("r-5678");
+    expect(result.id).toBe("r-5678");
     expect(result.state).toBe("pending_sigs");
     expect(receipt.outcome).toBe("completed");
   });
 
   it("strips null fields from canonical bytes (ADR-013 rule)", async () => {
     const fetchImpl = mockFetch([
-      { status: 201, body: { receipt: { receiptId: "r", state: "signed" } } },
+      { status: 201, body: { receipt: { id: "r", state: "signed" } } },
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch);
     // Deliberately pass null values (via cast) to exercise stripping.
@@ -308,7 +308,7 @@ describe("createReceiptEmitter.emit — happy path", () => {
 
   it("strips trailing slashes from klyxApiUrl", async () => {
     const fetchImpl = mockFetch([
-      { status: 201, body: { receipt: { receiptId: "r", state: "signed" } } },
+      { status: 201, body: { receipt: { id: "r", state: "signed" } } },
     ]);
     const emitter = createReceiptEmitter({
       klyxApiUrl: "https://klyx.example///",
@@ -329,7 +329,7 @@ describe("createReceiptEmitter.emit — error paths", () => {
     const fetchImpl = mockFetch([
       { status: 409, body: { error: "nonce already exists" } },
       // Would-be-retry-response, must NOT be consumed
-      { status: 201, body: { receipt: { receiptId: "r", state: "signed" } } },
+      { status: 201, body: { receipt: { id: "r", state: "signed" } } },
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch, {
       onError,
@@ -348,7 +348,7 @@ describe("createReceiptEmitter.emit — error paths", () => {
     const onError = vi.fn();
     const fetchImpl = mockFetch([
       { status: 401, body: { error: "invalid token" } },
-      { status: 201, body: { receipt: { receiptId: "r", state: "signed" } } },
+      { status: 201, body: { receipt: { id: "r", state: "signed" } } },
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch, {
       onError,
@@ -397,7 +397,7 @@ describe("createReceiptEmitter.emit — error paths", () => {
       { status: 500, body: { error: "transient" } },
       {
         status: 201,
-        body: { receipt: { receiptId: "r-retry", state: "signed" } },
+        body: { receipt: { id: "r-retry", state: "signed" } },
       },
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch, {
@@ -405,7 +405,7 @@ describe("createReceiptEmitter.emit — error paths", () => {
       retryBaseMs: 1,
     });
     const result = await emitter.emit(baseReceipt());
-    expect(result?.receiptId).toBe("r-retry");
+    expect(result?.id).toBe("r-retry");
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
@@ -437,10 +437,10 @@ describe("createReceiptEmitter.emit — error paths", () => {
     expect(onError.mock.calls[0][0].code).toBe("malformed_response");
   });
 
-  it("returns null when server response lacks receiptId", async () => {
+  it("returns null when server response lacks id", async () => {
     const onError = vi.fn();
     const fetchImpl = mockFetch([
-      { status: 201, body: { receipt: { state: "signed" } } }, // no receiptId
+      { status: 201, body: { receipt: { state: "signed" } } }, // no id
     ]);
     const emitter = makeEmitter(fetchImpl as unknown as typeof fetch, {
       onError,
