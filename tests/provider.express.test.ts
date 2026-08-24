@@ -8,6 +8,7 @@ import {
   paymentMiddleware,
   X402_VERSION,
   SCHEME_EXACT,
+  SCHEME_KLYX_ESCROW,
   NETWORK_KLEVER_TESTNET,
   type ReceiptEmitter,
   type EmittedReceipt,
@@ -408,6 +409,73 @@ describe("paymentMiddleware — receiptEmitter integration", () => {
 
     expect(emits).toHaveLength(1);
     expect(emits[0].paymentTxHash).toBeUndefined();
+  });
+
+  it("falls back to openEscrowTx when settle returns no transaction (klyx-escrow)", async () => {
+    // Real-world scenario: facilitator's klyx-escrow /settle
+    // re-verifies + trips nonce_reused (already claimed by earlier
+    // /verify) → returns success=false, no transaction field. The
+    // middleware should still populate paymentTxHash from the
+    // payload's openEscrowTx since that's the on-chain anchor.
+    const openEscrowTxHash = "deadbeef".repeat(8);
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+      // Settle returns success=false with no transaction — mirrors
+      // the current facilitator bug.
+      "/settle": {
+        body: {
+          success: false,
+          network: NETWORK_KLEVER_TESTNET,
+          payer: REQUESTER,
+          errorReason: "nonce_reused",
+        },
+      },
+    });
+    const { emitter, emits } = makeCapturingEmitter();
+    const app = express();
+    app.get(
+      "/premium",
+      paymentMiddleware({
+        facilitator: makeFacilitator(mockFetch as unknown as typeof fetch),
+        facilitatorUrl: FAC_URL,
+        payTo: PAY_TO,
+        accepts: [
+          {
+            scheme: SCHEME_KLYX_ESCROW,
+            network: NETWORK_KLEVER_TESTNET,
+            price: "500000",
+            asset: "KLV",
+          },
+        ],
+        receiptEmitter: emitter,
+      }),
+      (_req, res) => {
+        res.json({ ok: true });
+      },
+    );
+    // klyx-escrow payload with openEscrowTx set
+    const escrowPayload = {
+      x402Version: X402_VERSION,
+      scheme: SCHEME_KLYX_ESCROW,
+      network: NETWORK_KLEVER_TESTNET,
+      payload: {
+        asset: "KLV",
+        amount: "500000",
+        provider: PAY_TO,
+        nonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        expiresAt: "2030-01-01T00:00:00Z",
+        disputeWindowDays: 1,
+        openEscrowTx: openEscrowTxHash,
+      },
+    };
+    await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(escrowPayload));
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(emits).toHaveLength(1);
+    expect(emits[0].paymentTxHash).toBe(openEscrowTxHash);
+    expect(emits[0].settlementType).toBe("managed");
   });
 });
 

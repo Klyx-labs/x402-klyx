@@ -285,6 +285,21 @@ export function paymentMiddleware(
               "x-klyx-requester-agent",
             );
             settlePromise.then((settleRes) => {
+              // Prefer the settle response's tx hash; fall back to
+              // the payload's openEscrowTx for klyx-escrow (funds
+              // already locked at openEscrow time — that's the
+              // on-chain settlement anchor, and the facilitator's
+              // settle for this scheme is a pass-through anyway).
+              //
+              // The fallback also covers the current facilitator
+              // bug where settle re-verifies + trips nonce_reused
+              // and returns success=false → no transaction field —
+              // without this fallback, klyx-escrow receipts land
+              // with paymentTxHash=null even though the openEscrow
+              // tx is right there in the payload.
+              const paymentTxHash =
+                settleRes?.body.transaction ??
+                extractEscrowTxHash(paymentPayload);
               void emitter.emit({
                 outcome: "completed",
                 requesterWallet: payer || undefined,
@@ -292,7 +307,7 @@ export function paymentMiddleware(
                 paymentAsset: paymentRequirements.asset,
                 paymentAmountSmallest:
                   paymentRequirements.maxAmountRequired,
-                paymentTxHash: settleRes?.body.transaction,
+                paymentTxHash,
                 settlementType: mapSettlementType(paymentPayload.scheme),
                 invokedAt,
                 completedAt: new Date().toISOString(),
@@ -324,6 +339,22 @@ function mapSettlementType(
   if (scheme === SCHEME_EXACT) return "direct";
   if (scheme === SCHEME_KLYX_ESCROW) return "managed";
   return "external";
+}
+
+/** For klyx-escrow, the on-chain settlement anchor is the
+ *  openEscrow tx that the requester submitted before hitting the
+ *  provider. That hash lives in the payload's `openEscrowTx` field
+ *  so we can populate paymentTxHash from the payload directly
+ *  when settle didn't return one. Returns undefined for other
+ *  schemes or malformed payloads. */
+function extractEscrowTxHash(
+  paymentPayload: PaymentPayload,
+): string | undefined {
+  if (paymentPayload.scheme !== SCHEME_KLYX_ESCROW) return undefined;
+  const escrowPayload = paymentPayload.payload as { openEscrowTx?: unknown };
+  return typeof escrowPayload.openEscrowTx === "string"
+    ? escrowPayload.openEscrowTx
+    : undefined;
 }
 
 function respondWith402(
