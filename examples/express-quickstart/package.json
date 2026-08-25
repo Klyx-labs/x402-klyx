@@ -1,0 +1,14 @@
+{
+  "name": "example-express-quickstart",
+  "private": true,
+  "version": "0.0.0",
+  "description": "End-to-end paid HTTP demo — Express + @klyx/x402 + in-process stub facilitator.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "@klyx/x402": "file:../.."
+  }
+}
