@@ -211,6 +211,84 @@ describe("buildAndSignKleverExactPayload", () => {
     const payload = p.payload as { authorization: { attestation: string } };
     expect(payload.authorization.attestation).toMatch(/^[0-9a-f]{128}$/);
   });
+
+  // ── transferTx (v0.3) ────────────────────────────────────
+
+  describe("transferTx (optional fast-path field)", () => {
+    const TX_HASH = "deadbeef".repeat(8);
+
+    it("includes transferTx in the payload when set", async () => {
+      const p = await buildAndSignKleverExactPayload(
+        { ...baseInput(), transferTx: TX_HASH },
+        NETWORK_KLEVER_TESTNET,
+      );
+      const payload = p.payload as { transferTx?: string };
+      expect(payload.transferTx).toBe(TX_HASH);
+    });
+
+    it("omits transferTx from the payload when not set (backwards compat)", async () => {
+      const p = await buildAndSignKleverExactPayload(
+        baseInput(),
+        NETWORK_KLEVER_TESTNET,
+      );
+      expect("transferTx" in p.payload).toBe(false);
+    });
+
+    it("attestation covers transferTx (verify round-trip)", async () => {
+      const p = await buildAndSignKleverExactPayload(
+        { ...baseInput(), transferTx: TX_HASH },
+        NETWORK_KLEVER_TESTNET,
+      );
+      const payload = p.payload as {
+        asset: string;
+        amount: string;
+        destination: string;
+        nonce: string;
+        expiresAt: string;
+        transferTx: string;
+        authorization: {
+          signer: string;
+          publicKey: string;
+          attestation: string;
+        };
+      };
+      const { attestation, ...auth } = payload.authorization;
+      const canonicalBody = canonicalizeForAttestation({
+        asset: payload.asset,
+        amount: payload.amount,
+        destination: payload.destination,
+        nonce: payload.nonce,
+        expiresAt: payload.expiresAt,
+        transferTx: payload.transferTx,
+        authorization: auth,
+      });
+      expect(
+        verifyFacilitatorSignature({
+          canonicalBody,
+          signatureHex: attestation,
+          publicKeyHex: payload.authorization.publicKey,
+        }),
+      ).toBe(true);
+    });
+
+    it("rejects malformed transferTx (non-hex) at build time", async () => {
+      await expect(
+        buildAndSignKleverExactPayload(
+          { ...baseInput(), transferTx: "not-a-hex-hash" },
+          NETWORK_KLEVER_TESTNET,
+        ),
+      ).rejects.toThrow();
+    });
+
+    it("rejects uppercase transferTx (parity with lowercase-only invariant)", async () => {
+      await expect(
+        buildAndSignKleverExactPayload(
+          { ...baseInput(), transferTx: TX_HASH.toUpperCase() },
+          NETWORK_KLEVER_TESTNET,
+        ),
+      ).rejects.toThrow();
+    });
+  });
 });
 
 describe("parseKleverExactPayload", () => {

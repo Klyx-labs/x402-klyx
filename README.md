@@ -23,7 +23,7 @@ Not on npm yet. Install directly from git:
 
 ```bash
 # Pinned to a release tag (recommended)
-npm install github:Klyx-labs/x402-klyx#v0.2.0
+npm install github:Klyx-labs/x402-klyx#v0.3.0
 
 # Or a specific commit
 npm install github:Klyx-labs/x402-klyx#<sha>
@@ -199,6 +199,49 @@ Behavior:
 
 Not in v0:
 - `klyx-escrow` scheme (requires on-chain openEscrow tx submission — use `buildKlyxEscrowPayload` from core after submitting the tx yourself)
+
+## What's new in v0.3
+
+**Three additive features, no breaking changes** — existing v0.2.x consumers can bump the git ref to `#v0.3.0` and everything still works.
+
+**1. `generateKleverWallet()` — fresh keypair + `klv1…` address in one call**
+
+```ts
+import { generateKleverWallet, fromPrivateKey } from 'x402-klyx';
+
+const { address, publicKeyHex, privateKeyHex } = generateKleverWallet();
+// ⚠️ Persist privateKeyHex NOW (env var, secret manager, keystore).
+// If lost, funds sent to `address` are unrecoverable.
+
+const wallet = fromPrivateKey(privateKeyHex, address);
+```
+
+Random 32-byte ed25519 keypair, `klv1…` address derived via bech32 (Klever wallet convention). Address is 62 chars — matches the Klyx backend's `/api/auth/wallet-login` schema constraint. Not for browser flows where the user's extension holds the key — use an adapter (see `KleverWallet` docs).
+
+**2. `transferTx` on `KleverExactBuildInput`** — optional Klever tx hash of the direct Transfer you submitted. When set, the facilitator does an O(1) `getTransaction(transferTx)` lookup instead of scanning the destination's inbox. Attestation covers the field.
+
+```ts
+const payload = await buildAndSignKleverExactPayload({
+  asset: 'KLV', amount: '500000', destination, nonce, expiresAt, wallet,
+  transferTx: myKoperatorTxHash,   // NEW — pass through from your submission
+}, NETWORK_KLEVER_TESTNET);
+```
+
+Requires facilitator ≥ the corresponding PR (klyx#627). Older facilitators drop the field via zod strip and fall back to the search path — backwards compat both ways.
+
+**3. `maxDisputeWindowDays` on `AcceptedPayment`** — provider-side cap on how long a `klyx-escrow` payment can lock the funds. Rejects payloads over the cap at the middleware layer with `error: "dispute_window_too_long"`, before hitting the facilitator (saves an RTT). No-op for `klever-exact` (direct settlement has no window).
+
+```ts
+paymentMiddleware({
+  facilitator, facilitatorUrl, payTo,
+  accepts: [{
+    scheme: SCHEME_KLYX_ESCROW,
+    network: NETWORK_KLEVER_TESTNET,
+    price: '500000', asset: 'KLV',
+    maxDisputeWindowDays: 7,   // NEW — reject anything > 7 days
+  }],
+}, handler);
+```
 
 ## Migrating from v0.1
 

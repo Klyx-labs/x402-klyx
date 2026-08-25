@@ -7,7 +7,7 @@
  * here.
  */
 
-export const VERSION = "0.2.2";
+export const VERSION = "0.3.0";
 
 // Types + protocol constants
 export type {
@@ -81,7 +81,11 @@ export type {
 } from "./provider/express.js";
 
 // Wallet abstraction — used by both requester and receiptEmitter
-export { fromPrivateKey, assertValidSignatureHex } from "./core/wallet.js";
+export {
+  fromPrivateKey,
+  assertValidSignatureHex,
+  generateKleverWallet,
+} from "./core/wallet.js";
 export type { KleverWallet } from "./core/wallet.js";
 
 // Requester interceptor (fetch)

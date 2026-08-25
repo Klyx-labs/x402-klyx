@@ -28,7 +28,14 @@
  * signatures the facilitator silently rejects.
  */
 
-import { derivePublicKey, signAttestation } from "./signing.js";
+import { bech32 } from "bech32";
+import { randomBytes } from "@noble/hashes/utils";
+import {
+  bytesToHex,
+  derivePublicKey,
+  hexToBytes,
+  signAttestation,
+} from "./signing.js";
 
 export interface KleverWallet {
   /** klv1... bech32 address that will sign. */
@@ -107,4 +114,35 @@ export function assertValidSignatureHex(sig: unknown): asserts sig is string {
       "wallet.sign returned non-hex or uppercase characters; expected lowercase hex only",
     );
   }
+}
+
+/**
+ * Generate a fresh Klever wallet in memory — random ed25519 keypair
+ * + derived `klv1…` bech32 address. Useful for tests, dev
+ * scaffolding, or a one-time signup ceremony where the caller
+ * persists the private key somewhere safe before using it.
+ *
+ * ⚠️ **The returned `privateKeyHex` is the only thing that can sign
+ * as this address, ever.** If it's lost, funds sent to the address
+ * are unrecoverable. If it leaks, an attacker owns the address.
+ * Consumer responsibilities:
+ *   - Persist `privateKeyHex` to an env var, secret manager, or
+ *     encrypted keystore BEFORE using the wallet for anything real
+ *   - Never log or commit it
+ *   - Use `fromPrivateKey(privateKeyHex, address)` to construct a
+ *     `KleverWallet` for x402-klyx's provider / requester APIs
+ *
+ * For browser flows where the user's wallet extension already
+ * holds their key, this helper is the wrong tool — use a wallet-
+ * extension adapter (see `KleverWallet` docs) instead.
+ */
+export function generateKleverWallet(): {
+  address: string;
+  publicKeyHex: string;
+  privateKeyHex: string;
+} {
+  const privateKeyHex = bytesToHex(randomBytes(32));
+  const publicKeyHex = derivePublicKey(privateKeyHex);
+  const address = bech32.encode("klv", bech32.toWords(hexToBytes(publicKeyHex)));
+  return { address, publicKeyHex, privateKeyHex };
 }
