@@ -479,6 +479,177 @@ describe("paymentMiddleware — receiptEmitter integration", () => {
   });
 });
 
+describe("paymentMiddleware — maxDisputeWindowDays (v0.3)", () => {
+  const openEscrowTxHash = "cafebabe".repeat(8);
+
+  function makeEscrowPayload(disputeWindowDays: number) {
+    return {
+      x402Version: X402_VERSION,
+      scheme: SCHEME_KLYX_ESCROW,
+      network: NETWORK_KLEVER_TESTNET,
+      payload: {
+        asset: "KLV",
+        amount: "500000",
+        provider: PAY_TO,
+        nonce: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        expiresAt: "2030-01-01T00:00:00Z",
+        disputeWindowDays,
+        openEscrowTx: openEscrowTxHash,
+      },
+    };
+  }
+
+  function buildApp(maxDisputeWindowDays: number | undefined) {
+    // Fetch never called if middleware rejects at the window gate,
+    // so mockFetch can throw on unexpected calls to prove that.
+    const mockFetch = vi.fn(async () => {
+      throw new Error("facilitator should not be called");
+    });
+    const app = express();
+    app.get(
+      "/premium",
+      paymentMiddleware({
+        facilitator: makeFacilitator(mockFetch as unknown as typeof fetch),
+        facilitatorUrl: FAC_URL,
+        payTo: PAY_TO,
+        accepts: [
+          {
+            scheme: SCHEME_KLYX_ESCROW,
+            network: NETWORK_KLEVER_TESTNET,
+            price: "500000",
+            asset: "KLV",
+            ...(maxDisputeWindowDays !== undefined
+              ? { maxDisputeWindowDays }
+              : {}),
+          },
+        ],
+      }),
+      (_req, res) => {
+        res.json({ ok: true });
+      },
+    );
+    return { app, mockFetch };
+  }
+
+  it("rejects klyx-escrow payload with disputeWindowDays > cap (facilitator NOT called)", async () => {
+    const { app, mockFetch } = buildApp(7);
+    const res = await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(makeEscrowPayload(30)));
+    expect(res.status).toBe(402);
+    expect(res.body.error).toBe("dispute_window_too_long");
+    // Confirmed the middleware short-circuited before hitting the
+    // facilitator — the whole point of the gate is saving that RTT.
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("accepts klyx-escrow payload with disputeWindowDays == cap (inclusive)", async () => {
+    // Non-throwing fetch since we DO expect verify to be called.
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+      "/settle": {
+        body: { success: true, network: NETWORK_KLEVER_TESTNET, payer: REQUESTER },
+      },
+    });
+    const app = express();
+    app.get(
+      "/premium",
+      paymentMiddleware({
+        facilitator: makeFacilitator(mockFetch as unknown as typeof fetch),
+        facilitatorUrl: FAC_URL,
+        payTo: PAY_TO,
+        accepts: [
+          {
+            scheme: SCHEME_KLYX_ESCROW,
+            network: NETWORK_KLEVER_TESTNET,
+            price: "500000",
+            asset: "KLV",
+            maxDisputeWindowDays: 7,
+          },
+        ],
+      }),
+      (_req, res) => {
+        res.json({ ok: true });
+      },
+    );
+    const res = await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(makeEscrowPayload(7)));
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts klyx-escrow payload when maxDisputeWindowDays is not set", async () => {
+    // No cap → any window passes the middleware gate.
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+      "/settle": {
+        body: { success: true, network: NETWORK_KLEVER_TESTNET, payer: REQUESTER },
+      },
+    });
+    const app = express();
+    app.get(
+      "/premium",
+      paymentMiddleware({
+        facilitator: makeFacilitator(mockFetch as unknown as typeof fetch),
+        facilitatorUrl: FAC_URL,
+        payTo: PAY_TO,
+        accepts: [
+          {
+            scheme: SCHEME_KLYX_ESCROW,
+            network: NETWORK_KLEVER_TESTNET,
+            price: "500000",
+            asset: "KLV",
+            // no maxDisputeWindowDays
+          },
+        ],
+      }),
+      (_req, res) => {
+        res.json({ ok: true });
+      },
+    );
+    const res = await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(makeEscrowPayload(365)));
+    expect(res.status).toBe(200);
+  });
+
+  it("does NOT apply the cap to klever-exact (no-op for that scheme)", async () => {
+    // maxDisputeWindowDays is klyx-escrow-only. A klever-exact
+    // payload should sail past the gate regardless.
+    const mockFetch = makeMockFetch({
+      "/verify": { body: { isValid: true, payer: REQUESTER } },
+      "/settle": {
+        body: { success: true, network: NETWORK_KLEVER_TESTNET, payer: REQUESTER },
+      },
+    });
+    const app = express();
+    app.get(
+      "/premium",
+      paymentMiddleware({
+        facilitator: makeFacilitator(mockFetch as unknown as typeof fetch),
+        facilitatorUrl: FAC_URL,
+        payTo: PAY_TO,
+        accepts: [
+          {
+            scheme: SCHEME_EXACT,
+            network: NETWORK_KLEVER_TESTNET,
+            price: "500000",
+            asset: "KLV",
+            maxDisputeWindowDays: 1, // absurdly tight — should NOT apply
+          },
+        ],
+      }),
+      (_req, res) => {
+        res.json({ ok: true });
+      },
+    );
+    const res = await request(app)
+      .get("/premium")
+      .set("X-PAYMENT", encodePayment(SAMPLE_PAYLOAD));
+    expect(res.status).toBe(200);
+  });
+});
+
 describe("paymentMiddleware — constructor validation", () => {
   const fac = makeFacilitator(makeMockFetch({}) as unknown as typeof fetch);
   const baseAccept = [

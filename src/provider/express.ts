@@ -73,6 +73,21 @@ export interface AcceptedPayment {
   asset: string;
   /** Optional human-readable description shown in the 402 body. */
   description?: string;
+  /**
+   * Optional cap on how long a klyx-escrow payment can lock the
+   * funds. Klyx-escrow only — has no effect on klever-exact
+   * (direct settlement, no window). Rejects payloads with
+   * `disputeWindowDays > maxDisputeWindowDays` at the middleware
+   * layer (before calling facilitator.verify) with a 402 body
+   * carrying `error: "dispute_window_too_long"`.
+   *
+   * Use case: a provider who doesn't want to wait 60 days for
+   * funds can set this to 7, and requesters offering longer
+   * windows get bounced immediately with a clear signal to
+   * shorten. Contract enforces its own max (60d default); this
+   * is the PROVIDER'S preference on top.
+   */
+  maxDisputeWindowDays?: number;
 }
 
 export interface PaymentMiddlewareOptions {
@@ -199,6 +214,25 @@ export function paymentMiddleware(
     if (!acceptEntry) {
       respondWith402(res, opts, req, "unsupported_scheme_network");
       return;
+    }
+
+    // Provider-side dispute-window cap (klyx-escrow only). Rejects
+    // before hitting the facilitator so we don't waste an RTT on a
+    // payload we already know we don't want. klever-exact has no
+    // dispute window (direct settlement) — check is a no-op there.
+    if (
+      acceptEntry.maxDisputeWindowDays !== undefined &&
+      paymentPayload.scheme === SCHEME_KLYX_ESCROW
+    ) {
+      const escrow = paymentPayload.payload as { disputeWindowDays?: unknown };
+      const days =
+        typeof escrow.disputeWindowDays === "number"
+          ? escrow.disputeWindowDays
+          : Number.MAX_SAFE_INTEGER;
+      if (days > acceptEntry.maxDisputeWindowDays) {
+        respondWith402(res, opts, req, "dispute_window_too_long");
+        return;
+      }
     }
 
     const paymentRequirements: PaymentRequirements = {

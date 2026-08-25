@@ -1,6 +1,6 @@
 {
   "name": "x402-klyx",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "x402 payment protocol client for Klyx — accept and initiate paid HTTP invocations over Klever with receipt attestation.",
   "keywords": [
     "x402",

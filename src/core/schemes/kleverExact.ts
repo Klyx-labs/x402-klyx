@@ -35,6 +35,10 @@ const hexOnly = /^[0-9a-f]+$/;
 // caller submit a 10M-digit amount and DoS the facilitator on
 // BigInt() parse — same schema is shared, so bound here too.
 const bigIntString = /^\d{1,40}$/;
+// Klever tx hash — 32 bytes hex-encoded (64 chars lowercase).
+// Matches the facilitator's schema for `openEscrowTx` +
+// `transferTx`. Symmetric across schemes.
+const txHash = /^[0-9a-f]{40,128}$/;
 
 const kleverExactPayloadSchema = z.object({
   asset: z.string().min(1).max(64),
@@ -47,6 +51,13 @@ const kleverExactPayloadSchema = z.object({
     publicKey: z.string().regex(hexOnly).length(64, "publicKey must be 32 bytes hex (64 chars)"),
     attestation: z.string().regex(hexOnly).length(128, "attestation must be 64 bytes hex (128 chars)"),
   }),
+  // Optional — Klever tx hash of the direct Transfer the requester
+  // submitted. When present, the facilitator does an O(1)
+  // `getTransaction(transferTx)` + field-match instead of the
+  // slower search path. The attestation covers this field via
+  // canonicalizeForAttestation's `...rest` spread — a caller who
+  // tampers with the tx hash after signing invalidates their sig.
+  transferTx: z.string().regex(txHash).optional(),
 });
 
 export type KleverExactPayload = z.infer<typeof kleverExactPayloadSchema>;
@@ -65,6 +76,7 @@ const kleverExactBuildInputSchema = z.object({
     .regex(kleverBech32, "destination must be a lowercase klv1 bech32 address"),
   nonce: z.string().regex(hexOnly).min(32).max(128),
   expiresAt: z.string().datetime({ offset: true }),
+  transferTx: z.string().regex(txHash).optional(),
 });
 
 /**
@@ -105,6 +117,16 @@ export interface KleverExactBuildInput {
    * builder awaits either.
    */
   wallet: KleverWallet;
+  /**
+   * Optional Klever tx hash of the direct Transfer the requester
+   * already submitted. When set, the facilitator does an O(1)
+   * `getTransaction(transferTx)` lookup instead of the slower
+   * search path (scanning the destination's inbox for a matching
+   * tx). Recommended when your submission flow returns the hash
+   * — koperator, direct RPC, wallet SDK, etc. Attestation covers
+   * the field, so tampering after signing invalidates the sig.
+   */
+  transferTx?: string;
 }
 
 /**
@@ -132,6 +154,7 @@ export async function buildAndSignKleverExactPayload(
     destination: input.destination,
     nonce: input.nonce,
     expiresAt: input.expiresAt,
+    ...(input.transferTx ? { transferTx: input.transferTx } : {}),
   });
   const unsigned = {
     asset: input.asset,
@@ -143,6 +166,11 @@ export async function buildAndSignKleverExactPayload(
       signer: input.wallet.address,
       publicKey: input.wallet.publicKeyHex,
     },
+    // Include when set — canonicalize sorts fields alphabetically
+    // so `transferTx` lands in the correct position deterministic-
+    // ally. Attestation covers it via the same canonicalization
+    // pass that facilitator's canonicalizeForAttestation uses.
+    ...(input.transferTx ? { transferTx: input.transferTx } : {}),
   };
   const canonicalBody = canonicalizeForAttestation(unsigned);
   const attestation = await input.wallet.sign(canonicalBody);
