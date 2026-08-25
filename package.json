@@ -1,6 +1,6 @@
 {
-  "name": "x402-klyx",
-  "version": "0.3.0",
+  "name": "@klyx/x402",
+  "version": "0.4.0",
   "description": "x402 payment protocol client for Klyx — accept and initiate paid HTTP invocations over Klever with receipt attestation.",
   "keywords": [
     "x402",
@@ -23,6 +23,16 @@
   },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./hono": {
+      "types": "./dist/provider/hono.d.ts",
+      "default": "./dist/provider/hono.js"
+    }
+  },
   "files": [
     "dist",
     "README.md",
@@ -46,10 +56,14 @@
     "zod": "^3.23.0"
   },
   "peerDependencies": {
-    "express": "^4 || ^5"
+    "express": "^4 || ^5",
+    "hono": "^4"
   },
   "peerDependenciesMeta": {
     "express": {
+      "optional": true
+    },
+    "hono": {
       "optional": true
     }
   },
@@ -58,6 +72,7 @@
     "@types/node": "^20.11.30",
     "@types/supertest": "^6.0.2",
     "express": "^4.19.2",
+    "hono": "^4.13.4",
     "supertest": "^7.0.0",
     "typescript": "^5.4.5",
     "vitest": "^1.6.0"

@@ -1,0 +1,15 @@
+{
+  "name": "example-hono-quickstart",
+  "private": true,
+  "version": "0.0.0",
+  "description": "End-to-end paid HTTP demo — Hono + @klyx/x402 + in-process stub facilitator.",
+  "type": "module",
+  "scripts": {
+    "start": "node server.mjs"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "@hono/node-server": "^1.13.0",
+    "@klyx/x402": "file:../.."
+  }
+}

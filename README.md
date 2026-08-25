@@ -1,8 +1,10 @@
-# x402-klyx
+# @klyx/x402
 
 x402 payment protocol client for [Klyx](https://github.com/Klyx-labs) — accept and initiate paid HTTP invocations over Klever, with receipt attestation feeding on-chain agent reputation.
 
-**Status:** `v0` — in active development. Git-installable today, npm publish comes once the API stabilizes.
+**Status:** `v0` — in active development. Publishing to npm as `@klyx/x402`; the GitHub repo remains `Klyx-labs/x402-klyx`.
+
+> **Just want to try it?** → [`examples/express-quickstart`](./examples/express-quickstart) or [`examples/hono-quickstart`](./examples/hono-quickstart) — clone, `npm install`, `npm start`, watch a paid 402→200 flow run end-to-end in one process.
 
 ## What this gives you
 
@@ -19,19 +21,15 @@ Two settlement paths on Klever:
 
 ## Install
 
-Not on npm yet. Install directly from git:
-
 ```bash
-# Pinned to a release tag (recommended)
-npm install github:Klyx-labs/x402-klyx#v0.3.0
-
-# Or a specific commit
-npm install github:Klyx-labs/x402-klyx#<sha>
+npm install @klyx/x402
+# or from git:
+npm install github:Klyx-labs/x402-klyx#v0.4.0
 ```
 
-**Migrating from v0.1?** The wallet interface changed to a callback shape — see [Migrating from v0.1](#migrating-from-v01) at the bottom.
+Works with `pnpm add` and `yarn add`. TypeScript source auto-builds on install via the `prepare` script (git install only).
 
-Also works with `pnpm add` and `yarn add`. TypeScript source auto-builds on install via the `prepare` script.
+**Migrating from v0.1?** The wallet interface changed to a callback shape — see [Migrating from v0.1](#migrating-from-v01) at the bottom.
 
 ## Quickstart
 
@@ -44,7 +42,7 @@ import {
   paymentMiddleware,
   SCHEME_EXACT,
   NETWORK_KLEVER_TESTNET,
-} from 'x402-klyx';
+} from '@klyx/x402';
 
 const app = express();
 
@@ -91,12 +89,60 @@ Behavior:
 - On a 2xx response → `/settle` fires in the background (disable with `autoSettle: false`)
 - On any facilitator transport / signature failure → HTTP 502 with structured `code`
 
+### Provider — accepting paid invocations (Hono)
+
+Same middleware, hono-idiomatic. Import from the `@klyx/x402/hono` subpath so consumers who only use Express don't pull hono types.
+
+```ts
+import { Hono } from 'hono';
+import {
+  FacilitatorClient,
+  SCHEME_EXACT,
+  NETWORK_KLEVER_TESTNET,
+} from '@klyx/x402';
+import { paymentMiddleware, type X402Variables } from '@klyx/x402/hono';
+
+const facilitator = new FacilitatorClient({
+  url: 'https://facilitator.klyx.space',
+  publicKeysHex: ['<hex pubkey 1>', '<hex pubkey 2>'],
+});
+
+// Genericize Hono so c.get('x402') is typed in your handlers.
+const app = new Hono<{ Variables: X402Variables }>();
+
+app.get(
+  '/summarize',
+  paymentMiddleware({
+    facilitator,
+    facilitatorUrl: 'https://facilitator.klyx.space',
+    payTo: 'klv1yourwallet...',
+    accepts: [
+      {
+        scheme: SCHEME_EXACT,
+        network: NETWORK_KLEVER_TESTNET,
+        price: '500000',
+        asset: 'KLV',
+        description: 'summarize an article',
+      },
+    ],
+  }),
+  (c) => {
+    const { payer } = c.get('x402');
+    return c.json({ summary: '…', paidBy: payer });
+  },
+);
+
+export default app;   // Cloudflare Workers / Bun / Node with @hono/node-server
+```
+
+Behavior matches the Express middleware exactly — same 402 body, same header check, same `/verify` + background `/settle`, same `receiptEmitter` + `maxDisputeWindowDays` semantics. Runs anywhere Hono runs (Node, Bun, Deno, Cloudflare Workers).
+
 ### Receipts — feeding on-chain agent reputation
 
 Every settled x402 payment can emit a signed receipt to the Klyx API — that's what feeds `AgentValue` (the on-chain reputation score) and makes your agent discoverable + trustable. Wire the emitter into `paymentMiddleware` as an opt-in and it fires automatically after every 2xx completion:
 
 ```ts
-import { createReceiptEmitter, fromPrivateKey, paymentMiddleware } from 'x402-klyx';
+import { createReceiptEmitter, fromPrivateKey, paymentMiddleware } from '@klyx/x402';
 
 const receiptEmitter = createReceiptEmitter({
   klyxApiUrl: 'https://klyx.space',
@@ -153,7 +199,7 @@ const result = await receiptEmitter.emit({
 **Server-side agent (in-process key):**
 
 ```ts
-import { withPaymentInterceptor, fromPrivateKey } from 'x402-klyx';
+import { withPaymentInterceptor, fromPrivateKey } from '@klyx/x402';
 
 const wallet = fromPrivateKey(
   process.env.KLYX_WALLET_PRIVATE_KEY!,  // 32-byte hex
@@ -173,7 +219,7 @@ const res = await paidFetch('https://agent.example/summarize');
 **Browser / wallet-extension flow (no private key in-process):**
 
 ```ts
-import { withPaymentInterceptor, type KleverWallet } from 'x402-klyx';
+import { withPaymentInterceptor, type KleverWallet } from '@klyx/x402';
 
 // Wrap whatever your wallet extension exposes for message-signing.
 // The library gives you canonical bytes; you return 128-char hex.
@@ -200,6 +246,10 @@ Behavior:
 Not in v0:
 - `klyx-escrow` scheme (requires on-chain openEscrow tx submission — use `buildKlyxEscrowPayload` from core after submitting the tx yourself)
 
+## What's new in v0.4
+
+**Hono provider middleware** — import from `@klyx/x402/hono` and get the same wire behavior as the Express middleware, drop-in for Cloudflare Workers, Bun, Deno, or Node with `@hono/node-server`. See the [Hono Quickstart](#provider--accepting-paid-invocations-hono) above. No changes required for existing Express consumers.
+
 ## What's new in v0.3
 
 **Three additive features, no breaking changes** — existing v0.2.x consumers can bump the git ref to `#v0.3.0` and everything still works.
@@ -207,7 +257,7 @@ Not in v0:
 **1. `generateKleverWallet()` — fresh keypair + `klv1…` address in one call**
 
 ```ts
-import { generateKleverWallet, fromPrivateKey } from 'x402-klyx';
+import { generateKleverWallet, fromPrivateKey } from '@klyx/x402';
 
 const { address, publicKeyHex, privateKeyHex } = generateKleverWallet();
 // ⚠️ Persist privateKeyHex NOW (env var, secret manager, keystore).
@@ -260,7 +310,7 @@ const paidFetch = withPaymentInterceptor(fetch, wallet);
 **After (v0.2):** wrap in the `fromPrivateKey` helper —
 
 ```ts
-import { fromPrivateKey } from 'x402-klyx';
+import { fromPrivateKey } from '@klyx/x402';
 
 const wallet = fromPrivateKey(process.env.KLYX_KEY!, 'klv1...');
 const paidFetch = withPaymentInterceptor(fetch, wallet);
