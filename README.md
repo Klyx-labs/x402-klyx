@@ -202,9 +202,23 @@ Not in v0:
 
 ## What's new in v0.3
 
-**Two additive features, no breaking changes** — existing v0.2.x consumers can bump the git ref to `#v0.3.0` and everything still works.
+**Three additive features, no breaking changes** — existing v0.2.x consumers can bump the git ref to `#v0.3.0` and everything still works.
 
-**1. `transferTx` on `KleverExactBuildInput`** — optional Klever tx hash of the direct Transfer you submitted. When set, the facilitator does an O(1) `getTransaction(transferTx)` lookup instead of scanning the destination's inbox. Attestation covers the field.
+**1. `generateKleverWallet()` — fresh keypair + `klv1…` address in one call**
+
+```ts
+import { generateKleverWallet, fromPrivateKey } from 'x402-klyx';
+
+const { address, publicKeyHex, privateKeyHex } = generateKleverWallet();
+// ⚠️ Persist privateKeyHex NOW (env var, secret manager, keystore).
+// If lost, funds sent to `address` are unrecoverable.
+
+const wallet = fromPrivateKey(privateKeyHex, address);
+```
+
+Random 32-byte ed25519 keypair, `klv1…` address derived via bech32 (Klever wallet convention). Address is 62 chars — matches the Klyx backend's `/api/auth/wallet-login` schema constraint. Not for browser flows where the user's extension holds the key — use an adapter (see `KleverWallet` docs).
+
+**2. `transferTx` on `KleverExactBuildInput`** — optional Klever tx hash of the direct Transfer you submitted. When set, the facilitator does an O(1) `getTransaction(transferTx)` lookup instead of scanning the destination's inbox. Attestation covers the field.
 
 ```ts
 const payload = await buildAndSignKleverExactPayload({
@@ -215,7 +229,7 @@ const payload = await buildAndSignKleverExactPayload({
 
 Requires facilitator ≥ the corresponding PR (klyx#627). Older facilitators drop the field via zod strip and fall back to the search path — backwards compat both ways.
 
-**2. `maxDisputeWindowDays` on `AcceptedPayment`** — provider-side cap on how long a `klyx-escrow` payment can lock the funds. Rejects payloads over the cap at the middleware layer with `error: "dispute_window_too_long"`, before hitting the facilitator (saves an RTT). No-op for `klever-exact` (direct settlement has no window).
+**3. `maxDisputeWindowDays` on `AcceptedPayment`** — provider-side cap on how long a `klyx-escrow` payment can lock the funds. Rejects payloads over the cap at the middleware layer with `error: "dispute_window_too_long"`, before hitting the facilitator (saves an RTT). No-op for `klever-exact` (direct settlement has no window).
 
 ```ts
 paymentMiddleware({
