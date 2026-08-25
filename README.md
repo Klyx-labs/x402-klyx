@@ -23,7 +23,7 @@ Not on npm yet. Install directly from git:
 
 ```bash
 # Pinned to a release tag (recommended)
-npm install github:Klyx-labs/x402-klyx#v0.3.0
+npm install github:Klyx-labs/x402-klyx#v0.4.0
 
 # Or a specific commit
 npm install github:Klyx-labs/x402-klyx#<sha>
@@ -90,6 +90,54 @@ Behavior:
 - On `isValid: true` → your handler runs, `req.x402` populated
 - On a 2xx response → `/settle` fires in the background (disable with `autoSettle: false`)
 - On any facilitator transport / signature failure → HTTP 502 with structured `code`
+
+### Provider — accepting paid invocations (Hono)
+
+Same middleware, hono-idiomatic. Import from the `x402-klyx/hono` subpath so consumers who only use Express don't pull hono types.
+
+```ts
+import { Hono } from 'hono';
+import {
+  FacilitatorClient,
+  SCHEME_EXACT,
+  NETWORK_KLEVER_TESTNET,
+} from 'x402-klyx';
+import { paymentMiddleware, type X402Variables } from 'x402-klyx/hono';
+
+const facilitator = new FacilitatorClient({
+  url: 'https://facilitator.klyx.space',
+  publicKeysHex: ['<hex pubkey 1>', '<hex pubkey 2>'],
+});
+
+// Genericize Hono so c.get('x402') is typed in your handlers.
+const app = new Hono<{ Variables: X402Variables }>();
+
+app.get(
+  '/summarize',
+  paymentMiddleware({
+    facilitator,
+    facilitatorUrl: 'https://facilitator.klyx.space',
+    payTo: 'klv1yourwallet...',
+    accepts: [
+      {
+        scheme: SCHEME_EXACT,
+        network: NETWORK_KLEVER_TESTNET,
+        price: '500000',
+        asset: 'KLV',
+        description: 'summarize an article',
+      },
+    ],
+  }),
+  (c) => {
+    const { payer } = c.get('x402');
+    return c.json({ summary: '…', paidBy: payer });
+  },
+);
+
+export default app;   // Cloudflare Workers / Bun / Node with @hono/node-server
+```
+
+Behavior matches the Express middleware exactly — same 402 body, same header check, same `/verify` + background `/settle`, same `receiptEmitter` + `maxDisputeWindowDays` semantics. Runs anywhere Hono runs (Node, Bun, Deno, Cloudflare Workers).
 
 ### Receipts — feeding on-chain agent reputation
 
@@ -199,6 +247,10 @@ Behavior:
 
 Not in v0:
 - `klyx-escrow` scheme (requires on-chain openEscrow tx submission — use `buildKlyxEscrowPayload` from core after submitting the tx yourself)
+
+## What's new in v0.4
+
+**Hono provider middleware** — import from `x402-klyx/hono` and get the same wire behavior as the Express middleware, drop-in for Cloudflare Workers, Bun, Deno, or Node with `@hono/node-server`. See the [Hono Quickstart](#provider--accepting-paid-invocations-hono) above. No changes required for existing Express consumers.
 
 ## What's new in v0.3
 
