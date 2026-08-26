@@ -52,7 +52,7 @@ Skips the stub. Points at the deployed facilitator at `facilitator.klyx.space` w
 [3] ✅ Wire chain verified end-to-end.
 ```
 
-The 402 with `tx_not_found` is the *correct* response and the point of this mode. The request round-trips through Apache → PM2 → facilitator process → Klever API tx-lookup → signed response → client signature verify. The facilitator correctly rejects the payment because the throwaway requester wallet hasn't broadcast a matching Klever transfer — that's exactly what you want from a real facilitator. Rubber-stamping isn't a feature.
+The 402 with `tx_not_found` is the *correct* response and the point of this mode. The request round-trips through the full wire chain — payload signed with the requester's key, sent over TLS, attestation verified at the facilitator, on-chain tx lookup performed against Klever, response signed by the facilitator, signature verified by the client against the on-chain-registered pubkey. The facilitator correctly rejects the payment because the throwaway requester wallet hasn't broadcast a matching Klever transfer — that's exactly what you want from a real facilitator. Rubber-stamping isn't a feature.
 
 For the full real-KLV round-trip (koperator required, moves testnet KLV, ends with `isValid: true`), see `scripts/demo-x402-real` in the private klyx repo.
 

@@ -17,8 +17,10 @@
  *   real facilitator at facilitator.klyx.space + trusts the on-
  *   chain-registered pubkey. The demo returns `tx_not_found`
  *   because it doesn't broadcast a real Klever transfer — that
- *   proves the wire chain end-to-end (Apache → PM2 → facilitator
- *   → Klever API → signed response → client sig verify).
+ *   proves the wire chain end-to-end — payload signed → sent →
+ *   verified attestation → on-chain lookup → signed response →
+ *   client signature verified against the on-chain-registered
+ *   pubkey.
  *
  *   For the full REAL-KLV round-trip (koperator required, moves
  *   real testnet KLV), see scripts/demo-x402-real in the klyx repo.
@@ -196,11 +198,13 @@ console.log(`    → status: ${r2.status}`);
 console.log(`    → body:  `, r2body);
 
 // In hosted mode, tx_not_found is the EXPECTED response — proves the
-// wire chain works (Apache → PM2 → facilitator → Klever API → signed
-// response → client sig verify), just no matching on-chain transfer
-// exists for this fresh throwaway wallet. For the full real-KLV
-// round-trip (koperator + funded testnet wallet required), see
-// scripts/demo-x402-real in the klyx repo.
+// wire chain works end-to-end (attestation verified, on-chain tx
+// lookup ran, response signed with the facilitator's key, and this
+// client verified that signature against the on-chain-registered
+// pubkey). No matching Klever transfer exists yet for this fresh
+// throwaway wallet, which is why the facilitator correctly says so.
+// For the full real-KLV round-trip (koperator + funded testnet
+// wallet required), see scripts/demo-x402-real in the klyx repo.
 if (USE_HOSTED) {
   if (r2body.error === "tx_not_found") {
     console.log(
