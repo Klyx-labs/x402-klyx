@@ -4,7 +4,7 @@ x402 payment protocol client for [Klyx](https://github.com/Klyx-labs) — accept
 
 **Status:** `v0` — in active development. Publishing to npm as `@klyx/x402`; the GitHub repo remains `Klyx-labs/x402-klyx`.
 
-> **Just want to try it?** → [`examples/express-quickstart`](./examples/express-quickstart) or [`examples/hono-quickstart`](./examples/hono-quickstart) — clone, `npm install`, `npm start`, watch a paid 402→200 flow run end-to-end in one process.
+> **Just want to try it?** → [`examples/express-quickstart`](./examples/express-quickstart) or [`examples/hono-quickstart`](./examples/hono-quickstart) — clone, `npm install`, `npm start`, watch a paid 402→200 flow run end-to-end in one process. Set `USE_HOSTED_FACILITATOR=1` to point the same demo at the live Klyx facilitator at `facilitator.klyx.space` (testnet).
 
 ## What this gives you
 
@@ -24,7 +24,7 @@ Two settlement paths on Klever:
 ```bash
 npm install @klyx/x402
 # or from git:
-npm install github:Klyx-labs/x402-klyx#v0.4.0
+npm install github:Klyx-labs/x402-klyx#v0.4.1
 ```
 
 Works with `pnpm add` and `yarn add`. TypeScript source auto-builds on install via the `prepare` script (git install only).
