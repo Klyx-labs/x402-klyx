@@ -7,7 +7,7 @@
  * here.
  */
 
-export const VERSION = "0.4.1";
+export const VERSION = "0.4.2";
 
 // Types + protocol constants
 export type {
