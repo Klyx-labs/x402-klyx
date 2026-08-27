@@ -4,9 +4,9 @@ Version history + migration notes for `@klyx/x402`. Point-in-time record; the [R
 
 ---
 
-## v0.4.2 — Marketing README rewrite
+## v0.4.2 — README rewrite
 
-Docs-only republish so npmjs.com surfaces the new marketing README + this release history file. No library changes.
+Docs-only republish so npmjs.com surfaces the rewritten README + this release history file. No library changes.
 
 - README trimmed 345 → 148 lines; leads with a three-command hosted-facilitator demo, opinionated "why" bullets, honest roadmap.
 - New `RELEASES.md` (this file) — version history + migration notes moved out of README, now included in the npm tarball.
