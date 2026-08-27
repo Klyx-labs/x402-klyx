@@ -29,7 +29,7 @@ Watch a real 402 → payment → signed response round-trip through the live Kly
 npm install @klyx/x402
 ```
 
-Works with `npm`, `pnpm`, `yarn`. Also `npm install github:Klyx-labs/x402-klyx#v0.4.1` if you'd rather pin to a git ref.
+Works with `npm`, `pnpm`, `yarn`. Also `npm install github:Klyx-labs/x402-klyx#v0.4.2` if you'd rather pin to a git ref.
 
 Node 20+, TypeScript source ships with type definitions.
 
