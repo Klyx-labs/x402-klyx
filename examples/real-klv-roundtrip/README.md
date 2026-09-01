@@ -18,31 +18,17 @@ The offline stub examples ([`../express-quickstart`](../express-quickstart), [`.
 - **`koperator`** — Klever's CLI. Install via [Klever SDK](https://docs.klever.finance/setup-node/install-koperator), default location `~/klever-sdk/koperator` (override with `KOPERATOR` env)
 - **A funded testnet wallet** — see setup below
 
-## Setup
+## Setup + run
 
 ```bash
 cd examples/real-klv-roundtrip
 npm install
-
-# Generate a fresh keypair — one-time. Copy the output into .wallet.demo.json.
-node -e "
-  const { generateKleverWallet } = require('@klyx/x402');
-  console.log(JSON.stringify(generateKleverWallet(), null, 2));
-"
-
-# Copy the template and paste your generated address/keys in
-cp .wallet.demo.json.example .wallet.demo.json
-$EDITOR .wallet.demo.json
-
-# Fund the address with testnet KLV — ~5 KLV is plenty for many runs
-# https://faucet.testnet.klever.finance/
-```
-
-## Run
-
-```bash
 npm start
 ```
+
+**First run** auto-generates a fresh testnet keypair at `.wallet.demo.json` (gitignored) and exits with a "fund me" banner. Fund the printed address via [`https://faucet.testnet.klever.finance/`](https://faucet.testnet.klever.finance/) — ~5 KLV is plenty for many runs — then `npm start` again to run the actual round-trip.
+
+Subsequent runs reuse the same wallet.
 
 Expected output (paraphrased):
 
