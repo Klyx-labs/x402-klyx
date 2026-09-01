@@ -1,0 +1,13 @@
+{
+  "name": "example-real-klv-roundtrip",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Real-KLV end-to-end x402 settlement — broadcasts a real Klever transfer via koperator, then verifies at facilitator.klyx.space.",
+  "type": "module",
+  "scripts": {
+    "start": "node settle.mjs"
+  },
+  "dependencies": {
+    "@klyx/x402": "file:../.."
+  }
+}

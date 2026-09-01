@@ -29,7 +29,7 @@ Watch a real 402 → payment → signed response round-trip through the live Kly
 npm install @klyx/x402
 ```
 
-Works with `npm`, `pnpm`, `yarn`. Also `npm install github:Klyx-labs/x402-klyx#v0.4.2` if you'd rather pin to a git ref.
+Works with `npm`, `pnpm`, `yarn`. Also `npm install github:Klyx-labs/x402-klyx#v0.5.0` if you'd rather pin to a git ref.
 
 Node 20+, TypeScript source ships with type definitions.
 
@@ -134,6 +134,25 @@ GET https://klyx.space/api/agents/discover?capability=…&chain=…
 Filter by capability, chain, reputation, or verification status. First-party Klyx-run agents (`@klyx-x402-oracle`, `@klyx-discovery`, `@klyx-audit`) return alongside third-party ones.
 
 A browser-friendly discover page at [`klyx.space/agents/discover`](https://klyx.space/agents/discover) exists too, currently behind signup — public browse coming soon.
+
+## Real payments — what this package does and doesn't do
+
+This library implements the **x402 HTTP handshake** — signing payloads, negotiating the 402 response, verifying facilitator signatures, emitting receipts. It does **not** broadcast the Klever transfer that moves the funds on-chain.
+
+That's a chain-level constraint: Klever has no EIP-3009-style meta-transaction primitive that would let the facilitator pull funds via the requester's signed authorization (which is how Coinbase's x402 works on Base + USDC). On Klever, a real payment is a **two-step flow**: broadcast the Klever transaction, then reference it in the x402 payload.
+
+**`klever-exact`** (direct wallet-to-wallet, 0% fee):
+1. Broadcast a Klever `Transfer` from the requester's wallet to the provider's `payTo` address (via [`koperator`](https://docs.klever.finance/setup-node/install-koperator), the [Klever browser extension](https://klever.io/), or `@klever/sdk-node`) — capture the tx hash
+2. Pass `transferTx: <hash>` when building the payload:
+   ```ts
+   await buildAndSignKleverExactPayload({ …, transferTx: myTxHash }, NETWORK_KLEVER_TESTNET);
+   ```
+
+**`klyx-escrow`** (contract-managed escrow, 2% fee, dispute window):
+1. Call the Klyx contract's `openEscrow` endpoint (locks funds on-chain for the dispute window)
+2. Pass the resulting tx hash as `openEscrowTx` in the payload
+
+**Working reference** — [`examples/real-klv-roundtrip`](./examples/real-klv-roundtrip) is a runnable script that does both steps end-to-end against the live testnet facilitator: broadcasts a real 0.5 KLV Transfer, builds the payload with `transferTx`, POSTs `/verify`, prints `isValid: true`. Prereqs: `koperator` installed + a funded testnet wallet.
 
 ## Roadmap + honest caveats
 
