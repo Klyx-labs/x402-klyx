@@ -4,6 +4,14 @@ Version history + migration notes for `@klyx/x402`. Point-in-time record; the [R
 
 ---
 
+## v0.5.0 — Real-KLV round-trip example + two-step-model docs
+
+Closes the "unproven real settlement" gap that public consumers hit when reading the docs. No library API changes.
+
+- **New: `examples/real-klv-roundtrip/`** — runnable script that broadcasts a real Klever testnet Transfer via `koperator`, builds a klever-exact payload with `transferTx`, POSTs to the live `facilitator.klyx.space/verify`, and prints `isValid: true`. Prerequisites: `koperator` installed + a funded testnet wallet (~5 KLV via the public faucet).
+- **New README section: "Real payments — what this package does and doesn't do"** — frames the two-step model explicitly. This library handles the HTTP handshake + attestation signing; the caller broadcasts the Klever transaction. Klever has no EIP-3009 equivalent, so on-chain settlement is out-of-band by design (not a missing feature).
+- Bumps the fetch-pubkeys pattern in the example to hit `facilitator.klyx.space/keys` (v0.4.x-era rotation-safe endpoint) instead of a hardcoded array — dogfoods the self-describing facilitator endpoint.
+
 ## v0.4.2 — README rewrite
 
 Docs-only republish so npmjs.com surfaces the rewritten README + this release history file. No library changes.

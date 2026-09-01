@@ -1,0 +1,8 @@
+{
+  "_comment": "TESTNET-ONLY Klever wallet for the real-KLV round-trip example. Copy this file to .wallet.demo.json and fill in a fresh keypair generated via `generateKleverWallet()` from @klyx/x402, then fund the address with testnet KLV via https://faucet.testnet.klever.finance/ (~5 KLV is plenty for many runs). DO NOT reuse a mainnet key. DO NOT commit .wallet.demo.json — it's gitignored.",
+  "address": "klv1... (generate + fund on testnet)",
+  "publicKeyHex": "... (64 hex chars — from generateKleverWallet)",
+  "privateKeyHex": "... (64 hex chars — from generateKleverWallet, keep secret)",
+  "network": "klever-testnet",
+  "purpose": "requester wallet for the real-KLV x402 round-trip example"
+}
