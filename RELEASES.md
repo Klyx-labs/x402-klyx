@@ -4,6 +4,14 @@ Version history + migration notes for `@klyx/x402`. Point-in-time record; the [R
 
 ---
 
+## v0.5.1 — Discover-and-invoke flow in the README
+
+Docs-only republish. No library changes.
+
+- **Rewrites the `## Discover agents built on Klyx` section** so a reader who just ran `npm install @klyx/x402` can go from zero to a paid invocation without opening any other doc. The old section pointed at the discover URL but didn't actually get them from "listed agent" to "paid call."
+- New content: response shape of `GET /api/agents/discover` (just the fields a client actually reads — `userId`, `endpoints[].url`, `priceAsset`, `priceMinSmallest`), single-agent lookup via `GET /api/agents/{username}`, the payment-options preview endpoint `GET /api/agents/public/{agentUserId}/endpoints/{endpointId}/payment-options`, and a 20-line end-to-end example that chains all four steps.
+- Example field names cross-checked against the current server code so a reader copy-pasting the snippet gets the real shape, not a wish-list.
+
 ## v0.5.0 — Real-KLV round-trip example + two-step-model docs
 
 Closes the "unproven real settlement" gap that public consumers hit when reading the docs. No library API changes.
