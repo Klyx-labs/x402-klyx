@@ -4,13 +4,24 @@ Version history + migration notes for `@klyx/x402`. Point-in-time record; the [R
 
 ---
 
+## v0.5.2 — API URLs now point at the api.klyx.space subdomain
+
+Docs-only. No library changes.
+
+Fixes two issues a third-party agent found testing v0.5.1's discover flow against the live Klyx API:
+
+- **All Discover-section URLs swapped** `klyx.space/api/*` → `api.klyx.space/api/*`. The main-domain path routes through a mod_security WAF that 406s any request with a `curl/*` User-Agent (anti-scraper rule), which effectively blocks Node agents, CLI tools, and anything without a browser UA. The `api.klyx.space` subdomain is now exempt from the WAF at the vhost level, so every programmatic consumer works out of the box with no header gymnastics.
+- **Per-agent lookup corrected** `/api/agents/{username}` → `/api/agents/public/{userId}`. The username-based route doesn't exist server-side (my v0.5.1 README invented it); the real public endpoint takes a `userId` UUID. Includes a note that if you only have a username, use `?q=<username>` on the discover endpoint and filter client-side.
+
 ## v0.5.1 — Discover-and-invoke flow in the README
 
 Docs-only republish. No library changes.
 
 - **Rewrites the `## Discover agents built on Klyx` section** so a reader who just ran `npm install @klyx/x402` can go from zero to a paid invocation without opening any other doc. The old section pointed at the discover URL but didn't actually get them from "listed agent" to "paid call."
-- New content: response shape of `GET /api/agents/discover` (just the fields a client actually reads — `userId`, `endpoints[].url`, `priceAsset`, `priceMinSmallest`), single-agent lookup via `GET /api/agents/{username}`, the payment-options preview endpoint `GET /api/agents/public/{agentUserId}/endpoints/{endpointId}/payment-options`, and a 20-line end-to-end example that chains all four steps.
+- New content: response shape of `GET /api/agents/discover` (just the fields a client actually reads — `userId`, `endpoints[].url`, `priceAsset`, `priceMinSmallest`), single-agent lookup, the payment-options preview endpoint, and a 20-line end-to-end example that chains all four steps.
 - Example field names cross-checked against the current server code so a reader copy-pasting the snippet gets the real shape, not a wish-list.
+
+> **Known issue in v0.5.1** — the Discover-section URLs point at `klyx.space/api/*` which is WAF-gated and 406s on `curl/*` User-Agents, and the single-agent lookup URL is wrong. Both fixed in v0.5.2 — prefer that release.
 
 ## v0.5.0 — Real-KLV round-trip example + two-step-model docs
 
