@@ -4,6 +4,16 @@ Version history + migration notes for `@klyx/x402`. Point-in-time record; the [R
 
 ---
 
+## v0.5.3 — zod v4
+
+Deps-only. No public-API changes.
+
+- **Bump `zod` ^3.23.0 → ^4.6.6** to clear GHSA-mrhx-c7xc-m3w5 ("zod can exhaust memory while validating oversized constrained collections"). The advisory only has a fix on the v4 line, so v3 consumers were stuck until upgrade.
+- Zero source changes: the zod surface this library uses (`z.object`, `z.string().regex`, `z.string().datetime({offset:true})`, `z.string().length`, `z.string().min().max()`, `z.number().int().positive()`, `.optional()`, `.parse`, `z.infer`) is identical across v3→v4. All 176 tests pass unchanged.
+- Also aligns `VERSION` constant with `package.json` (had drifted behind at `0.5.0`).
+
+Consumers pinning this package via GitHub tag should bump to `#v0.5.3`.
+
 ## v0.5.2 — API URLs now point at the api.klyx.space subdomain
 
 Docs-only. No library changes.
